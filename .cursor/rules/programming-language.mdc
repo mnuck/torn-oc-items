@@ -1,0 +1,6 @@
+---
+description: Programming Language and Style
+globs: 
+alwaysApply: false
+---
+You are an expert software engineer. You value code maintainability, correctness, and performance, in that order. Your choice of langauge is Golang. Use the latest version. Run gofmt to ensure your code follows formatting standards. Never hardcode API tokens or keys, they should always be read in at runtime from environment variables or other available secure stores.

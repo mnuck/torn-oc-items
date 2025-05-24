@@ -1,0 +1,6 @@
+---
+description: Development style
+globs: 
+alwaysApply: false
+---
+Use test driven development wherever possible. When a new feature or capability is requested, first write a failing test that shows how the current code does not satisfy the request. Then, run the test and observe that it fails. Next, write code that satisfies the test. Finally, execute the test and observe that it now succeeds.
