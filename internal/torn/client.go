@@ -98,6 +98,38 @@ type cachedUser struct {
 	timestamp time.Time
 }
 
+// Log API types
+type LogItem struct {
+	ID  int `json:"id"`
+	UID int `json:"uid"`
+	Qty int `json:"qty"`
+}
+
+type ItemSendData struct {
+	Receiver int       `json:"receiver"`
+	Items    []LogItem `json:"items"`
+	Message  string    `json:"message"`
+}
+
+type LogEntry struct {
+	Log       int          `json:"log"`
+	Title     string       `json:"title"`
+	Timestamp int64        `json:"timestamp"`
+	Category  string       `json:"category"`
+	Data      ItemSendData `json:"data"`
+}
+
+type LogResponse struct {
+	Log map[string]LogEntry `json:"log"`
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 func NewClient(apiKey string) *Client {
 	return &Client{
 		apiKey: apiKey,
@@ -240,4 +272,90 @@ func (c *Client) GetUnavailableItems(ctx context.Context) ([]UnavailableItem, er
 	}
 
 	return unavailableItems, nil
+}
+
+func (c *Client) GetItemSendLogs(ctx context.Context) (*LogResponse, error) {
+	log.Debug().Msg("Making request to item send logs API")
+
+	// Calculate timestamps for last 48 hours
+	now := time.Now()
+	from := now.Add(-48 * time.Hour).Unix()
+	to := now.Unix()
+
+	url := fmt.Sprintf("https://api.torn.com/user?selections=log&log=4102&from=%d&to=%d&key=%s", from, to, c.apiKey)
+
+	log.Debug().
+		Int64("from_timestamp", from).
+		Int64("to_timestamp", to).
+		Str("from_time", time.Unix(from, 0).Format("2006-01-02 15:04:05")).
+		Str("to_time", time.Unix(to, 0).Format("2006-01-02 15:04:05")).
+		Msg("Querying logs for time range")
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Increment API call counter
+	c.IncrementAPICall()
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to make request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	log.Debug().
+		Int("status_code", resp.StatusCode).
+		Str("content_type", resp.Header.Get("Content-Type")).
+		Msg("Received API response")
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		log.Debug().
+			Int("status_code", resp.StatusCode).
+			Str("response_body", string(body)).
+			Msg("Non-200 response from API")
+		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Read the entire response body first for debugging
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	log.Debug().
+		Int("body_length", len(body)).
+		Str("response_body_preview", string(body[:min(500, len(body))])).
+		Msg("Read response body")
+
+	var logResp LogResponse
+	if err := json.Unmarshal(body, &logResp); err != nil {
+		log.Debug().
+			Err(err).
+			Str("response_body", string(body)).
+			Msg("Failed to unmarshal JSON response")
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	log.Debug().
+		Int("log_entries_count", len(logResp.Log)).
+		Msg("Successfully parsed log response")
+
+	// Log a few sample log IDs if available
+	if len(logResp.Log) > 0 {
+		count := 0
+		for logID := range logResp.Log {
+			if count >= 3 {
+				break
+			}
+			log.Debug().
+				Str("sample_log_id", logID).
+				Msg("Sample log entry ID")
+			count++
+		}
+	}
+
+	return &logResp, nil
 }
