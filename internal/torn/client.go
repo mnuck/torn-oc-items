@@ -13,12 +13,13 @@ import (
 )
 
 type Client struct {
-	apiKey       string
-	client       *http.Client
-	itemCache    sync.Map
-	userCache    sync.Map
-	apiCallCount int64
-	apiCallMutex sync.Mutex
+	apiKey        string
+	factionApiKey string
+	client        *http.Client
+	itemCache     sync.Map
+	userCache     sync.Map
+	apiCallCount  int64
+	apiCallMutex  sync.Mutex
 }
 
 type Item struct {
@@ -134,9 +135,10 @@ func min(a, b int) int {
 	return b
 }
 
-func NewClient(apiKey string) *Client {
+func NewClient(apiKey string, factionApiKey string) *Client {
 	return &Client{
-		apiKey: apiKey,
+		apiKey:        apiKey,
+		factionApiKey: factionApiKey,
 		client: &http.Client{
 			Timeout: 10 * time.Second,
 		},
@@ -261,7 +263,7 @@ func (c *Client) GetUser(ctx context.Context, userID string) (*UserInfo, error) 
 }
 
 func (c *Client) GetFactionCrimes(ctx context.Context, category string, offset int) (*CrimesResponse, error) {
-	url := fmt.Sprintf("https://api.torn.com/v2/faction/crimes?key=%s&cat=%s&offset=%d", c.apiKey, category, offset)
+	url := fmt.Sprintf("https://api.torn.com/v2/faction/crimes?key=%s&cat=%s&offset=%d", c.factionApiKey, category, offset)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {

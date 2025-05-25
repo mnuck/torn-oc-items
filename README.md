@@ -14,8 +14,8 @@ Create a `.env` file in the project root with the following variables:
 
 ```env
 # Required
-TORN_API_KEY=your_api_key_here        # Your Torn API key
-TORN_FACTION_API_KEY=your_api_key     # Your Torn Faction API key
+TORN_API_KEY=your_api_key_here        # Your Torn API key for general API access
+TORN_FACTION_API_KEY=your_api_key     # Your Torn Faction API key for faction-specific endpoints
 SHEETS_CREDENTIALS=path/to/creds.json # Path to Google Sheets API credentials file
 SPREADSHEET_ID=your_spreadsheet_id    # ID of the target Google Spreadsheet
 

@@ -51,9 +51,10 @@ func main() {
 func initializeClients(ctx context.Context) (*torn.Client, *sheets.Client) {
 	log.Debug().Msg("Initializing clients")
 	apiKey := getRequiredEnv("TORN_API_KEY")
+	factionApiKey := getRequiredEnv("TORN_FACTION_API_KEY")
 	credsFile := getRequiredEnv("SHEETS_CREDENTIALS")
 
-	tornClient := torn.NewClient(apiKey)
+	tornClient := torn.NewClient(apiKey, factionApiKey)
 	sheetsClient, err := sheets.NewClient(ctx, credsFile)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to create sheets client")
