@@ -48,3 +48,19 @@ func (c *Client) AppendRows(ctx context.Context, spreadsheetID, range_ string, r
 
 	return nil
 }
+
+func (c *Client) UpdateRange(ctx context.Context, spreadsheetID, range_ string, values [][]interface{}) error {
+	valueRange := &sheets.ValueRange{
+		Values: values,
+	}
+
+	_, err := c.service.Spreadsheets.Values.Update(spreadsheetID, range_, valueRange).
+		ValueInputOption("RAW").
+		Context(ctx).
+		Do()
+	if err != nil {
+		return fmt.Errorf("failed to update range: %w", err)
+	}
+
+	return nil
+}
