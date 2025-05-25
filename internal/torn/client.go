@@ -395,3 +395,33 @@ func (c *Client) GetItemSendLogs(ctx context.Context) (*LogResponse, error) {
 
 	return &logResp, nil
 }
+
+func (c *Client) WhoAmI(ctx context.Context) (string, error) {
+	url := fmt.Sprintf("https://api.torn.com/user/?selections=basic&key=%s", c.apiKey)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Increment API call counter
+	c.IncrementAPICall()
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to make request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var userInfo UserInfo
+	if err := json.NewDecoder(resp.Body).Decode(&userInfo); err != nil {
+		return "", fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return userInfo.Name, nil
+}

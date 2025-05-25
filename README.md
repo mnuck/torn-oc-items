@@ -23,6 +23,7 @@ SPREADSHEET_ID=your_spreadsheet_id    # ID of the target Google Spreadsheet
 ENV=development                       # Environment: development or production
 LOGLEVEL=info                         # Log level: debug, info, warn, error, fatal, panic, disabled
 SPREADSHEET_RANGE=Test Sheet!A1       # Sheet range to read/write (default: Test Sheet!A1)
+PROVIDER_KEYS=key1,key2               # Comma-separated item provider Full Access Torn API keys
 ```
 
 ## Building
@@ -30,21 +31,3 @@ SPREADSHEET_RANGE=Test Sheet!A1       # Sheet range to read/write (default: Test
 ```bash
 go build
 ```
-
-## Running
-
-```bash
-./torn_oc_items
-```
-
-## Logging
-
-The application uses zerolog for logging. Log levels can be configured via the `LOGLEVEL` environment variable:
-
-- debug: Detailed debugging information
-- info: General operational information
-- warn: Warning messages
-- error: Error messages
-- fatal: Fatal errors
-- panic: Panic messages
-- disabled: No logging

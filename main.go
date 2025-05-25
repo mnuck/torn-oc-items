@@ -6,11 +6,15 @@ import (
 	"strings"
 	"time"
 
+	"torn_oc_items/internal/providers"
 	"torn_oc_items/internal/sheets"
 	"torn_oc_items/internal/torn"
 
 	"github.com/rs/zerolog/log"
 )
+
+// global provider list
+var providerList []providers.Provider
 
 type SheetRow struct {
 	RowIndex int
@@ -34,6 +38,9 @@ func main() {
 
 	ctx := context.Background()
 	tornClient, sheetsClient := initializeClients(ctx)
+
+	// Load providers
+	providerList = providers.LoadProviders(ctx)
 
 	log.Info().Msg("Starting Torn OC Items monitor. Running immediately and then every minute...")
 
@@ -150,7 +157,7 @@ func runProcessLoop(ctx context.Context, tornClient *torn.Client, sheetsClient *
 	// Process provided items
 	log.Debug().Msg("Starting provided items processing")
 	apiCallsBeforeProvided := tornClient.GetAPICallCount()
-	processProvidedItems(ctx, tornClient, sheetsClient)
+	processProvidedItems(ctx, tornClient, sheetsClient, providerList)
 	apiCallsAfterProvided := tornClient.GetAPICallCount()
 
 	totalAPICalls := tornClient.GetAPICallCount()
@@ -161,7 +168,7 @@ func runProcessLoop(ctx context.Context, tornClient *torn.Client, sheetsClient *
 		Msg("API call summary for runProcessLoop()")
 }
 
-func processProvidedItems(ctx context.Context, tornClient *torn.Client, sheetsClient *sheets.Client) {
+func processProvidedItems(ctx context.Context, tornClient *torn.Client, sheetsClient *sheets.Client, providerList []providers.Provider) {
 	log.Debug().Msg("Starting provided items processing")
 
 	// Get current sheet data first
@@ -173,13 +180,9 @@ func processProvidedItems(ctx context.Context, tornClient *torn.Client, sheetsCl
 		Int("parsed_items", len(sheetItems)).
 		Msg("Parsed sheet items")
 
-	// Get item send logs
-	log.Debug().Msg("Fetching item send logs")
-	logResp, err := tornClient.GetItemSendLogs(ctx)
-	if err != nil {
-		log.Warn().Err(err).Msg("Failed to get item send logs")
-		return
-	}
+	// Get item send logs from all providers
+	log.Debug().Msg("Fetching item send logs from all providers")
+	logResp := providers.AggregateLogs(ctx, providerList)
 
 	// Find sheet rows that need provider updates
 	updates := findProviderUpdates(ctx, tornClient, sheetItems, logResp)
@@ -273,84 +276,39 @@ func findProviderUpdates(ctx context.Context, tornClient *torn.Client, sheetItem
 		Int("log_entries", len(logResp.Log)).
 		Msg("Starting provider update matching")
 
-	// For each log entry, try to match it to a sheet item that doesn't have a provider
-	for logID, logEntry := range logResp.Log {
-		log.Debug().
-			Str("log_id", logID).
-			Int("receiver_id", logEntry.Data.Receiver).
-			Int("items_count", len(logEntry.Data.Items)).
-			Int64("timestamp", logEntry.Timestamp).
-			Msg("Processing log entry")
+	for combinedID, logEntry := range logResp.Log {
+		// combinedID format: providerName|logID
+		parts := strings.SplitN(combinedID, "|", 2)
+		providerName := "Unknown"
+		if len(parts) == 2 {
+			providerName = parts[0]
+		}
 
 		receiverID := logEntry.Data.Receiver
-
-		// Get receiver name for matching
 		receiverName := getUserNameByID(ctx, tornClient, receiverID)
 		if receiverName == "" {
-			log.Debug().
-				Int("receiver_id", receiverID).
-				Msg("Failed to get receiver name, skipping log entry")
 			continue
 		}
 
-		log.Debug().
-			Int("receiver_id", receiverID).
-			Str("receiver_name", receiverName).
-			Msg("Found receiver name")
-
 		for _, logItem := range logEntry.Data.Items {
 			itemID := logItem.ID
-
-			log.Debug().
-				Int("item_id", itemID).
-				Int("quantity", logItem.Qty).
-				Msg("Processing log item")
-
-			// Get item name for matching
 			itemName := getItemNameByID(ctx, tornClient, itemID)
 			if itemName == "" {
-				log.Debug().
-					Int("item_id", itemID).
-					Msg("Failed to get item name, skipping log item")
 				continue
 			}
 
-			log.Debug().
-				Int("item_id", itemID).
-				Str("item_name", itemName).
-				Msg("Found item name")
-
-			// Find matching sheet item without provider
 			for _, sheetItem := range sheetItems {
-				log.Debug().
-					Int("row", sheetItem.RowIndex).
-					Str("sheet_item_name", sheetItem.ItemName).
-					Str("sheet_user_name", sheetItem.UserName).
-					Bool("has_provider", sheetItem.HasProvider).
-					Msg("Checking sheet item")
-
 				if !sheetItem.HasProvider &&
 					matchesUser(sheetItem.UserName, receiverName, receiverID) &&
 					matchesItem(sheetItem.ItemName, itemName, itemID) {
 
-					log.Debug().
-						Int("row", sheetItem.RowIndex).
-						Str("sheet_item_name", sheetItem.ItemName).
-						Str("sheet_user_name", sheetItem.UserName).
-						Str("log_item_name", itemName).
-						Str("log_receiver_name", receiverName).
-						Msg("Found matching item")
-
-					// Get market value
 					marketValue := getItemMarketValue(ctx, tornClient, itemID)
-
-					// Format timestamp
 					timestamp := time.Unix(logEntry.Timestamp, 0)
 					dateTime := timestamp.Format("15:04:05 - 02/01/06")
 
 					updates = append(updates, SheetRowUpdate{
 						RowIndex:    sheetItem.RowIndex,
-						Provider:    "WillieMcCoy", // Hardcoded for now
+						Provider:    providerName,
 						DateTime:    dateTime,
 						MarketValue: marketValue,
 					})
@@ -359,18 +317,11 @@ func findProviderUpdates(ctx context.Context, tornClient *torn.Client, sheetItem
 						Int("row", sheetItem.RowIndex).
 						Str("item", sheetItem.ItemName).
 						Str("user", sheetItem.UserName).
-						Str("provider", "WillieMcCoy").
+						Str("provider", providerName).
 						Float64("market_value", marketValue).
 						Msg("Found provided item match")
 
-					break // Only match once per log entry
-				} else {
-					log.Debug().
-						Int("row", sheetItem.RowIndex).
-						Bool("has_provider", sheetItem.HasProvider).
-						Bool("user_match", matchesUser(sheetItem.UserName, receiverName, receiverID)).
-						Bool("item_match", matchesItem(sheetItem.ItemName, itemName, itemID)).
-						Msg("Sheet item did not match")
+					break
 				}
 			}
 		}
@@ -419,11 +370,7 @@ func matchesUser(sheetUserName, logUserName string, logUserID int) bool {
 
 	// Check if sheet has fallback format "User ID: X"
 	expectedFallback := fmt.Sprintf("User ID: %d", logUserID)
-	if sheetUserName == expectedFallback {
-		return true
-	}
-
-	return false
+	return sheetUserName == expectedFallback
 }
 
 func matchesItem(sheetItemName, logItemName string, logItemID int) bool {
@@ -434,11 +381,7 @@ func matchesItem(sheetItemName, logItemName string, logItemID int) bool {
 
 	// Check if sheet has fallback format "Item ID: X"
 	expectedFallback := fmt.Sprintf("Item ID: %d", logItemID)
-	if sheetItemName == expectedFallback {
-		return true
-	}
-
-	return false
+	return sheetItemName == expectedFallback
 }
 
 func getItemMarketValue(ctx context.Context, tornClient *torn.Client, itemID int) float64 {

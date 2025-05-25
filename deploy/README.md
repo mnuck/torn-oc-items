@@ -13,6 +13,7 @@ cp env.template .env
 ```
 
 Edit the `.env` file with your actual values:
+
 - `TORN_API_KEY`: Your Torn API key with log access
 - `TORN_FACTION_API_KEY`: Your Torn Faction API key
 - `SPREADSHEET_ID`: Your Google Spreadsheet ID
@@ -72,4 +73,4 @@ kubectl apply -f deployment.yaml
 - The .env file and credentials are stored as Kubernetes secrets
 - Files are mounted read-only into the container
 - Container runs as non-root user (UID 1001)
-- Security contexts prevent privilege escalation 
+- Security contexts prevent privilege escalation
