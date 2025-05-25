@@ -11,6 +11,22 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+type SheetRow struct {
+	RowIndex int
+	CrimeURL string
+	ItemName string
+	UserName string
+	Provider string // Column B
+	DateTime string // Column D
+}
+
+type SheetRowUpdate struct {
+	RowIndex    int
+	Provider    string
+	DateTime    string
+	MarketValue float64
+}
+
 func main() {
 	setupEnvironment()
 
@@ -93,12 +109,380 @@ func runProcessLoop(ctx context.Context, tornClient *torn.Client, sheetsClient *
 	existing := buildExistingMap(existingData)
 
 	rows := processUnavailableItems(ctx, tornClient, unavailableItems, existing)
-	if len(rows) == 0 {
-		log.Info().Msg("No new items to add to sheet.")
+		apiCallsAfterProcessing := tornClient.GetAPICallCount()
+
+		if len(rows) > 0 {
+			log.Debug().Int("rows", len(rows)).Msg("Updating sheet with new items")
+			updateSheet(ctx, sheetsClient, rows, len(unavailableItems))
+		} else {
+			log.Debug().Msg("No new items to add to sheet")
+		}
+
+		log.Info().
+			Int64("api_calls_processing_unavailable", apiCallsAfterProcessing-apiCallsAfterUnavailable).
+			Msg("API calls for processUnavailableItems()")
+	} else {
+		log.Debug().Msg("No unavailable items found")
+	}
+
+	// Process provided items
+	log.Debug().Msg("Starting provided items processing")
+	apiCallsBeforeProvided := tornClient.GetAPICallCount()
+	processProvidedItems(ctx, tornClient, sheetsClient)
+	apiCallsAfterProvided := tornClient.GetAPICallCount()
+
+	totalAPICalls := tornClient.GetAPICallCount()
+	log.Info().
+		Int64("api_calls_get_unavailable", apiCallsAfterUnavailable).
+		Int64("api_calls_process_provided", apiCallsAfterProvided-apiCallsBeforeProvided).
+		Int64("total_api_calls_this_loop", totalAPICalls).
+		Msg("API call summary for runProcessLoop()")
+}
+
+func processProvidedItems(ctx context.Context, tornClient *torn.Client, sheetsClient *sheets.Client) {
+	log.Debug().Msg("Starting provided items processing")
+
+	// Get current sheet data first
+	existingData := readExistingSheetData(ctx, sheetsClient)
+	sheetItems := parseSheetItems(existingData)
+
+	log.Debug().
+		Int("total_rows", len(existingData)).
+		Int("parsed_items", len(sheetItems)).
+		Msg("Parsed sheet items")
+
+	// Get item send logs
+	log.Debug().Msg("Fetching item send logs")
+	logResp, err := tornClient.GetItemSendLogs(ctx)
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to get item send logs")
 		return
 	}
 
-	updateSheet(ctx, sheetsClient, rows, len(unavailableItems))
+	// Find sheet rows that need provider updates
+	updates := findProviderUpdates(ctx, tornClient, sheetItems, logResp)
+	if len(updates) > 0 {
+		log.Debug().
+			Int("updates", len(updates)).
+			Msg("Updating provided item rows")
+		updateProvidedItemRows(ctx, sheetsClient, updates)
+	} else {
+		log.Debug().Msg("No provided items to update")
+	}
+}
+
+type SheetItem struct {
+	RowIndex    int
+	CrimeURL    string
+	ItemName    string
+	UserName    string
+	Provider    string
+	HasProvider bool
+}
+
+func parseSheetItems(existingData [][]interface{}) []SheetItem {
+	log.Debug().Int("rows", len(existingData)).Msg("Parsing sheet items")
+	var items []SheetItem
+
+	for i, row := range existingData {
+		if len(row) < 6 {
+			log.Debug().
+				Int("row", i+1).
+				Int("columns", len(row)).
+				Msg("Skipping row with insufficient columns")
+			continue
+		}
+
+		// Check if provider column (B) is blank
+		provider := ""
+		hasProvider := false
+		if len(row) > 1 && row[1] != nil {
+			provider = strings.TrimSpace(fmt.Sprintf("%v", row[1]))
+			hasProvider = provider != ""
+		}
+
+		// Extract other information
+		crimeURL := ""
+		itemName := ""
+		userName := ""
+
+		if len(row) > 2 && row[2] != nil {
+			crimeURL = fmt.Sprintf("%v", row[2])
+		}
+		if len(row) > 4 && row[4] != nil {
+			itemName = fmt.Sprintf("%v", row[4])
+		}
+		if len(row) > 5 && row[5] != nil {
+			userName = fmt.Sprintf("%v", row[5])
+		}
+
+		if crimeURL != "" && itemName != "" && userName != "" {
+			items = append(items, SheetItem{
+				RowIndex:    i + 1, // 1-indexed for sheets
+				CrimeURL:    crimeURL,
+				ItemName:    itemName,
+				UserName:    userName,
+				Provider:    provider,
+				HasProvider: hasProvider,
+			})
+		} else {
+			log.Debug().
+				Int("row", i+1).
+				Str("crime_url", crimeURL).
+				Str("item_name", itemName).
+				Str("user_name", userName).
+				Msg("Skipping row with missing required fields")
+		}
+	}
+
+	log.Debug().
+		Int("total_rows", len(existingData)).
+		Int("parsed_items", len(items)).
+		Msg("Finished parsing sheet items")
+
+	return items
+}
+
+func findProviderUpdates(ctx context.Context, tornClient *torn.Client, sheetItems []SheetItem, logResp *torn.LogResponse) []SheetRowUpdate {
+	var updates []SheetRowUpdate
+
+	log.Debug().
+		Int("sheet_items", len(sheetItems)).
+		Int("log_entries", len(logResp.Log)).
+		Msg("Starting provider update matching")
+
+	// For each log entry, try to match it to a sheet item that doesn't have a provider
+	for logID, logEntry := range logResp.Log {
+		log.Debug().
+			Str("log_id", logID).
+			Int("receiver_id", logEntry.Data.Receiver).
+			Int("items_count", len(logEntry.Data.Items)).
+			Int64("timestamp", logEntry.Timestamp).
+			Msg("Processing log entry")
+
+		receiverID := logEntry.Data.Receiver
+
+		// Get receiver name for matching
+		receiverName := getUserNameByID(ctx, tornClient, receiverID)
+		if receiverName == "" {
+			log.Debug().
+				Int("receiver_id", receiverID).
+				Msg("Failed to get receiver name, skipping log entry")
+			continue
+		}
+
+		log.Debug().
+			Int("receiver_id", receiverID).
+			Str("receiver_name", receiverName).
+			Msg("Found receiver name")
+
+		for _, logItem := range logEntry.Data.Items {
+			itemID := logItem.ID
+
+			log.Debug().
+				Int("item_id", itemID).
+				Int("quantity", logItem.Qty).
+				Msg("Processing log item")
+
+			// Get item name for matching
+			itemName := getItemNameByID(ctx, tornClient, itemID)
+			if itemName == "" {
+				log.Debug().
+					Int("item_id", itemID).
+					Msg("Failed to get item name, skipping log item")
+				continue
+			}
+
+			log.Debug().
+				Int("item_id", itemID).
+				Str("item_name", itemName).
+				Msg("Found item name")
+
+			// Find matching sheet item without provider
+			for _, sheetItem := range sheetItems {
+				log.Debug().
+					Int("row", sheetItem.RowIndex).
+					Str("sheet_item_name", sheetItem.ItemName).
+					Str("sheet_user_name", sheetItem.UserName).
+					Bool("has_provider", sheetItem.HasProvider).
+					Msg("Checking sheet item")
+
+				if !sheetItem.HasProvider &&
+					matchesUser(sheetItem.UserName, receiverName, receiverID) &&
+					matchesItem(sheetItem.ItemName, itemName, itemID) {
+
+					log.Debug().
+						Int("row", sheetItem.RowIndex).
+						Str("sheet_item_name", sheetItem.ItemName).
+						Str("sheet_user_name", sheetItem.UserName).
+						Str("log_item_name", itemName).
+						Str("log_receiver_name", receiverName).
+						Msg("Found matching item")
+
+					// Get market value
+					marketValue := getItemMarketValue(ctx, tornClient, itemID)
+
+					// Format timestamp
+					timestamp := time.Unix(logEntry.Timestamp, 0)
+					dateTime := timestamp.Format("15:04:05 - 02/01/06")
+
+					updates = append(updates, SheetRowUpdate{
+						RowIndex:    sheetItem.RowIndex,
+						Provider:    "WillieMcCoy", // Hardcoded for now
+						DateTime:    dateTime,
+						MarketValue: marketValue,
+					})
+
+					log.Info().
+						Int("row", sheetItem.RowIndex).
+						Str("item", sheetItem.ItemName).
+						Str("user", sheetItem.UserName).
+						Str("provider", "WillieMcCoy").
+						Float64("market_value", marketValue).
+						Msg("Found provided item match")
+
+					break // Only match once per log entry
+				} else {
+					log.Debug().
+						Int("row", sheetItem.RowIndex).
+						Bool("has_provider", sheetItem.HasProvider).
+						Bool("user_match", matchesUser(sheetItem.UserName, receiverName, receiverID)).
+						Bool("item_match", matchesItem(sheetItem.ItemName, itemName, itemID)).
+						Msg("Sheet item did not match")
+				}
+			}
+		}
+	}
+
+	log.Debug().
+		Int("updates_found", len(updates)).
+		Msg("Completed provider update matching")
+
+	return updates
+}
+
+func getUserNameByID(ctx context.Context, tornClient *torn.Client, userID int) string {
+	log.Debug().Int("user_id", userID).Msg("Getting user details")
+	userDetails, err := tornClient.GetUser(ctx, fmt.Sprintf("%d", userID))
+	if err != nil {
+		log.Debug().Err(err).Int("user_id", userID).Msg("Failed to get user details for matching")
+		return ""
+	}
+	log.Debug().
+		Int("user_id", userID).
+		Str("name", userDetails.Name).
+		Msg("Retrieved user details")
+	return userDetails.Name
+}
+
+func getItemNameByID(ctx context.Context, tornClient *torn.Client, itemID int) string {
+	log.Debug().Int("item_id", itemID).Msg("Getting item details")
+	itemDetails, err := tornClient.GetItem(ctx, fmt.Sprintf("%d", itemID))
+	if err != nil {
+		log.Debug().Err(err).Int("item_id", itemID).Msg("Failed to get item details for matching")
+		return ""
+	}
+	log.Debug().
+		Int("item_id", itemID).
+		Str("name", itemDetails.Name).
+		Msg("Retrieved item details")
+	return itemDetails.Name
+}
+
+func matchesUser(sheetUserName, logUserName string, logUserID int) bool {
+	// Direct name match
+	if sheetUserName == logUserName {
+		return true
+	}
+
+	// Check if sheet has fallback format "User ID: X"
+	expectedFallback := fmt.Sprintf("User ID: %d", logUserID)
+	if sheetUserName == expectedFallback {
+		return true
+	}
+
+	return false
+}
+
+func matchesItem(sheetItemName, logItemName string, logItemID int) bool {
+	// Direct name match
+	if sheetItemName == logItemName {
+		return true
+	}
+
+	// Check if sheet has fallback format "Item ID: X"
+	expectedFallback := fmt.Sprintf("Item ID: %d", logItemID)
+	if sheetItemName == expectedFallback {
+		return true
+	}
+
+	return false
+}
+
+func getItemMarketValue(ctx context.Context, tornClient *torn.Client, itemID int) float64 {
+	log.Debug().Int("item_id", itemID).Msg("Getting item market value")
+	item, err := tornClient.GetItem(ctx, fmt.Sprintf("%d", itemID))
+	if err != nil {
+		log.Warn().Err(err).Int("item_id", itemID).Msg("Failed to get item market value")
+		return 0
+	}
+	return item.MarketValue
+}
+
+func updateProvidedItemRows(ctx context.Context, sheetsClient *sheets.Client, updates []SheetRowUpdate) {
+	log.Debug().
+		Int("updates", len(updates)).
+		Msg("Updating provided item rows")
+
+	spreadsheetID := getRequiredEnv("SPREADSHEET_ID")
+
+	for _, update := range updates {
+		log.Debug().
+			Int("row", update.RowIndex).
+			Str("provider", update.Provider).
+			Str("datetime", update.DateTime).
+			Float64("market_value", update.MarketValue).
+			Msg("Updating row")
+
+		// Update individual cells: B (provider), D (datetime), G (market value)
+		values := [][]interface{}{
+			{update.Provider},
+		}
+		bRange := fmt.Sprintf("Test Sheet!B%d", update.RowIndex)
+		if err := sheetsClient.UpdateRange(ctx, spreadsheetID, bRange, values); err != nil {
+			log.Error().Err(err).Int("row", update.RowIndex).Msg("Failed to update provider column")
+			continue
+		}
+
+		values = [][]interface{}{
+			{update.DateTime},
+		}
+		dRange := fmt.Sprintf("Test Sheet!D%d", update.RowIndex)
+		if err := sheetsClient.UpdateRange(ctx, spreadsheetID, dRange, values); err != nil {
+			log.Error().Err(err).Int("row", update.RowIndex).Msg("Failed to update datetime column")
+			continue
+		}
+
+		values = [][]interface{}{
+			{update.MarketValue},
+		}
+		gRange := fmt.Sprintf("Test Sheet!G%d", update.RowIndex)
+		if err := sheetsClient.UpdateRange(ctx, spreadsheetID, gRange, values); err != nil {
+			log.Error().Err(err).Int("row", update.RowIndex).Msg("Failed to update market value column")
+			continue
+		}
+
+		log.Info().
+			Int("row", update.RowIndex).
+			Str("provider", update.Provider).
+			Str("datetime", update.DateTime).
+			Float64("market_value", update.MarketValue).
+			Msg("Updated provided item row")
+	}
+
+	log.Debug().
+		Int("updates", len(updates)).
+		Msg("Finished updating provided item rows")
 }
 
 func processUnavailableItems(ctx context.Context, tornClient *torn.Client, unavailableItems []torn.UnavailableItem, existing map[string]bool) [][]interface{} {
