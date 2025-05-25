@@ -29,7 +29,7 @@ Build the Docker image and push it to the local registry:
 
 ```bash
 # Build the image
-docker build -t localhost:32000/torn-oc-items:0.0.1 .
+docker build -t localhost:32000/torn-oc-items:0.0.1 -f build/Dockerfile .
 
 # Push to local registry
 docker push localhost:32000/torn-oc-items:0.0.1
