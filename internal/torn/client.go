@@ -4,12 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"sync"
+	"time"
 )
 
 type Client struct {
-	apiKey string
-	client *http.Client
+	apiKey    string
+	client    *http.Client
+	itemCache sync.Map
+	userCache sync.Map
 }
 
 type Item struct {
@@ -83,16 +88,36 @@ type UnavailableItem struct {
 	CrimeID int `json:"crime_id"`
 }
 
+type cachedItem struct {
+	item      *Item
+	timestamp time.Time
+}
+
+type cachedUser struct {
+	user      *UserInfo
+	timestamp time.Time
+}
+
 func NewClient(apiKey string) *Client {
 	return &Client{
 		apiKey: apiKey,
-		client: &http.Client{},
+		client: &http.Client{
+			Timeout: 10 * time.Second,
+		},
 	}
 }
 
 func (c *Client) GetItem(ctx context.Context, itemID string) (*Item, error) {
-	url := fmt.Sprintf("https://api.torn.com/torn/%s?selections=items&key=%s", itemID, c.apiKey)
+	// Check cache first
+	if cached, ok := c.itemCache.Load(itemID); ok {
+		cachedItem := cached.(cachedItem)
+		// Cache valid for 1 hour
+		if time.Since(cachedItem.timestamp) < time.Hour {
+			return cachedItem.item, nil
+		}
+	}
 
+	url := fmt.Sprintf("https://api.torn.com/torn/%s?selections=items&key=%s", itemID, c.apiKey)
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -104,20 +129,42 @@ func (c *Client) GetItem(ctx context.Context, itemID string) (*Item, error) {
 	}
 	defer resp.Body.Close()
 
-	var itemsResp ItemsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&itemsResp); err != nil {
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Items map[string]Item `json:"items"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	item, ok := itemsResp.Items[itemID]
+	item, ok := result.Items[itemID]
 	if !ok {
 		return nil, fmt.Errorf("item %s not found", itemID)
 	}
+
+	// Cache the result
+	c.itemCache.Store(itemID, cachedItem{
+		item:      &item,
+		timestamp: time.Now(),
+	})
 
 	return &item, nil
 }
 
 func (c *Client) GetUser(ctx context.Context, userID string) (*UserInfo, error) {
+	// Check cache first
+	if cached, ok := c.userCache.Load(userID); ok {
+		cachedUser := cached.(cachedUser)
+		// Cache valid for 1 hour
+		if time.Since(cachedUser.timestamp) < time.Hour {
+			return cachedUser.user, nil
+		}
+	}
+
 	url := fmt.Sprintf("https://api.torn.com/user/%s?selections=basic&key=%s", userID, c.apiKey)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
@@ -131,10 +178,21 @@ func (c *Client) GetUser(ctx context.Context, userID string) (*UserInfo, error) 
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
 	var userInfo UserInfo
 	if err := json.NewDecoder(resp.Body).Decode(&userInfo); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
+
+	// Cache the result
+	c.userCache.Store(userID, cachedUser{
+		user:      &userInfo,
+		timestamp: time.Now(),
+	})
 
 	return &userInfo, nil
 }
