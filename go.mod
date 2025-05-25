@@ -2,7 +2,11 @@ module torn_oc_items
 
 go 1.24.2
 
-require google.golang.org/api v0.234.0
+require (
+	github.com/joho/godotenv v1.5.1
+	github.com/rs/zerolog v1.34.0
+	google.golang.org/api v0.234.0
+)
 
 require (
 	cloud.google.com/go/auth v0.16.1 // indirect
@@ -15,10 +19,8 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.6 // indirect
 	github.com/googleapis/gax-go/v2 v2.14.2 // indirect
-	github.com/joho/godotenv v1.5.1 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.19 // indirect
-	github.com/rs/zerolog v1.34.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.60.0 // indirect
 	go.opentelemetry.io/otel v1.35.0 // indirect
