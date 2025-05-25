@@ -74,3 +74,41 @@ kubectl apply -f deployment.yaml
 - Files are mounted read-only into the container
 - Container runs as non-root user (UID 1001)
 - Security contexts prevent privilege escalation
+
+## Modifying the .env File
+
+To modify the .env file after deployment:
+
+1. Get the current .env from the secret:
+
+   ```bash
+   kubectl get secret torn-oc-secrets -o json | jq -r '.data[".env"]' | base64 -d > .env
+   ```
+
+2. Edit the downloaded `.env` file with the new values
+
+3. Base64 encode the updated .env file:
+
+   ```bash
+   ENV_CONTENT=$(cat .env | base64 -w 0)
+   ```
+
+4. Update the secret:
+
+   ```bash
+   sed -i "s/your_base64_encoded_env_file_content_here/$ENV_CONTENT/" torn-secret.yaml
+   ```
+
+5. Apply the updated secret:
+
+   ```bash
+   kubectl apply -f torn-secret.yaml
+   ```
+
+6. Restart the deployment to pick up the new values:
+
+   ```bash
+   kubectl rollout restart deployment torn-oc-items
+   ```
+
+Note: The pod will automatically restart with the new environment variables.

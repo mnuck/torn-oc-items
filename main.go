@@ -59,7 +59,7 @@ func initializeClients(ctx context.Context) (*torn.Client, *sheets.Client) {
 	log.Debug().Msg("Initializing clients")
 	apiKey := getRequiredEnv("TORN_API_KEY")
 	factionApiKey := getRequiredEnv("TORN_FACTION_API_KEY")
-	credsFile := getRequiredEnv("SHEETS_CREDENTIALS")
+	credsFile := "/credentials.json"
 
 	tornClient := torn.NewClient(apiKey, factionApiKey)
 	sheetsClient, err := sheets.NewClient(ctx, credsFile)
