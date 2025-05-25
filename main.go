@@ -153,7 +153,7 @@ func runProcessLoop(ctx context.Context, tornClient *torn.Client, sheetsClient *
 	apiCallsAfterProvided := tornClient.GetAPICallCount()
 
 	totalAPICalls := tornClient.GetAPICallCount()
-	log.Info().
+	log.Debug().
 		Int64("api_calls_get_unavailable", apiCallsAfterUnavailable).
 		Int64("api_calls_process_provided", apiCallsAfterProvided-apiCallsBeforeProvided).
 		Int64("total_api_calls_this_loop", totalAPICalls).
