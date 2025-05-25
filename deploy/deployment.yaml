@@ -31,19 +31,25 @@ spec:
           limits:
             cpu: "100m"
             memory: "100Mi"
-        env:
-        - name: TORN_FACTION_API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: torn-secrets
-              key: torn-faction-api-key
-        - name: TORN_API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: torn-secrets
-              key: torn-api-key
-        - name: ENV
-          value: production
-        # Optional: Uncomment and set desired log level
-        # - name: LOGLEVEL 
-        #   value: "debug"
+        volumeMounts:
+        - name: env-file
+          mountPath: /app/.env
+          subPath: .env
+          readOnly: true
+        - name: credentials-file
+          mountPath: /app/secrets/credentials.json
+          subPath: credentials.json
+          readOnly: true
+      volumes:
+      - name: env-file
+        secret:
+          secretName: torn-secrets
+          items:
+          - key: .env
+            path: .env
+      - name: credentials-file
+        secret:
+          secretName: torn-secrets
+          items:
+          - key: credentials.json
+            path: credentials.json
