@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: torn-oc-items
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: torn-oc-items
+  template:
+    metadata:
+      labels:
+        app: torn-oc-items
+    spec:
+      containers:
+      - name: oc-item-monitor
+        image: localhost:32000/torn-oc-items:0.0.1
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          runAsUser: 1001
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+        resources:
+          requests:
+            cpu: "50m"
+            memory: "50Mi"
+          limits:
+            cpu: "100m"
+            memory: "100Mi"
+        env:
+        - name: TORN_FACTION_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: torn-secrets
+              key: torn-faction-api-key
+        - name: TORN_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: torn-secrets
+              key: torn-api-key
+        - name: ENV
+          value: production
+        # Optional: Uncomment and set desired log level
+        # - name: LOGLEVEL 
+        #   value: "debug"
