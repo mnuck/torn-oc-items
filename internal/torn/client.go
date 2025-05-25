@@ -8,13 +8,17 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/rs/zerolog/log"
 )
 
 type Client struct {
-	apiKey    string
-	client    *http.Client
-	itemCache sync.Map
-	userCache sync.Map
+	apiKey       string
+	client       *http.Client
+	itemCache    sync.Map
+	userCache    sync.Map
+	apiCallCount int64
+	apiCallMutex sync.Mutex
 }
 
 type Item struct {
@@ -139,6 +143,27 @@ func NewClient(apiKey string) *Client {
 	}
 }
 
+// IncrementAPICall safely increments the API call counter
+func (c *Client) IncrementAPICall() {
+	c.apiCallMutex.Lock()
+	c.apiCallCount++
+	c.apiCallMutex.Unlock()
+}
+
+// GetAPICallCount returns the current API call count
+func (c *Client) GetAPICallCount() int64 {
+	c.apiCallMutex.Lock()
+	defer c.apiCallMutex.Unlock()
+	return c.apiCallCount
+}
+
+// ResetAPICallCount resets the API call counter to zero
+func (c *Client) ResetAPICallCount() {
+	c.apiCallMutex.Lock()
+	c.apiCallCount = 0
+	c.apiCallMutex.Unlock()
+}
+
 func (c *Client) GetItem(ctx context.Context, itemID string) (*Item, error) {
 	// Check cache first
 	if cached, ok := c.itemCache.Load(itemID); ok {
@@ -154,6 +179,9 @@ func (c *Client) GetItem(ctx context.Context, itemID string) (*Item, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
+
+	// Increment API call counter
+	c.IncrementAPICall()
 
 	resp, err := c.client.Do(req)
 	if err != nil {
@@ -204,6 +232,9 @@ func (c *Client) GetUser(ctx context.Context, userID string) (*UserInfo, error) 
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
+	// Increment API call counter
+	c.IncrementAPICall()
+
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to make request: %w", err)
@@ -236,6 +267,9 @@ func (c *Client) GetFactionCrimes(ctx context.Context, category string, offset i
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
+
+	// Increment API call counter
+	c.IncrementAPICall()
 
 	resp, err := c.client.Do(req)
 	if err != nil {

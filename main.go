@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"torn_oc_items/internal/sheets"
@@ -28,6 +29,7 @@ type SheetRowUpdate struct {
 }
 
 func main() {
+	log.Debug().Msg("Starting application")
 	setupEnvironment()
 
 	ctx := context.Background()
@@ -47,6 +49,7 @@ func main() {
 }
 
 func initializeClients(ctx context.Context) (*torn.Client, *sheets.Client) {
+	log.Debug().Msg("Initializing clients")
 	apiKey := getRequiredEnv("TORN_API_KEY")
 	credsFile := getRequiredEnv("SHEETS_CREDENTIALS")
 
@@ -56,27 +59,40 @@ func initializeClients(ctx context.Context) (*torn.Client, *sheets.Client) {
 		log.Fatal().Err(err).Msg("Failed to create sheets client")
 	}
 
+	log.Debug().Msg("Clients initialized successfully")
 	return tornClient, sheetsClient
 }
 
 func getUnavailableItems(ctx context.Context, tornClient *torn.Client) []torn.UnavailableItem {
+	log.Debug().Msg("Fetching unavailable items")
+	callsBefore := tornClient.GetAPICallCount()
+
 	unavailableItems, err := tornClient.GetUnavailableItems(ctx)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to get unavailable items")
 	}
+
+	callsAfter := tornClient.GetAPICallCount()
+	log.Debug().
+		Int("count", len(unavailableItems)).
+		Int64("api_calls", callsAfter-callsBefore).
+		Msg("Retrieved unavailable items")
 	return unavailableItems
 }
 
 func readExistingSheetData(ctx context.Context, sheetsClient *sheets.Client) [][]interface{} {
+	log.Debug().Msg("Reading existing sheet data")
 	spreadsheetID := getRequiredEnv("SPREADSHEET_ID")
 	existingData, err := sheetsClient.ReadSheet(ctx, spreadsheetID, "Test Sheet!A1:Z1000")
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to read existing sheet data")
 	}
+	log.Debug().Int("rows", len(existingData)).Msg("Retrieved existing sheet data")
 	return existingData
 }
 
 func buildExistingMap(existingData [][]interface{}) map[string]bool {
+	log.Debug().Msg("Building existing items map")
 	existing := make(map[string]bool)
 	for _, row := range existingData {
 		if len(row) >= 6 {
@@ -94,21 +110,26 @@ func buildExistingMap(existingData [][]interface{}) map[string]bool {
 			}
 		}
 	}
+	log.Debug().Int("entries", len(existing)).Msg("Built existing items map")
 	return existing
 }
 
 func runProcessLoop(ctx context.Context, tornClient *torn.Client, sheetsClient *sheets.Client) {
+	log.Debug().Msg("Starting process loop")
+
+	// Reset API call counter at the start
+	tornClient.ResetAPICallCount()
+
+	// Process new unavailable items
 	unavailableItems := getUnavailableItems(ctx, tornClient)
+	apiCallsAfterUnavailable := tornClient.GetAPICallCount()
 
-	if len(unavailableItems) == 0 {
-		log.Info().Msg("No unavailable items found in planning crimes.")
-		return
-	}
+	if len(unavailableItems) > 0 {
+		log.Debug().Int("count", len(unavailableItems)).Msg("Processing new unavailable items")
+		existingData := readExistingSheetData(ctx, sheetsClient)
+		existing := buildExistingMap(existingData)
 
-	existingData := readExistingSheetData(ctx, sheetsClient)
-	existing := buildExistingMap(existingData)
-
-	rows := processUnavailableItems(ctx, tornClient, unavailableItems, existing)
+		rows := processUnavailableItems(ctx, tornClient, unavailableItems, existing)
 		apiCallsAfterProcessing := tornClient.GetAPICallCount()
 
 		if len(rows) > 0 {
@@ -486,6 +507,8 @@ func updateProvidedItemRows(ctx context.Context, sheetsClient *sheets.Client, up
 }
 
 func processUnavailableItems(ctx context.Context, tornClient *torn.Client, unavailableItems []torn.UnavailableItem, existing map[string]bool) [][]interface{} {
+	log.Debug().Int("count", len(unavailableItems)).Msg("Processing unavailable items")
+	callsBefore := tornClient.GetAPICallCount()
 	var rows [][]interface{}
 
 	for _, itm := range unavailableItems {
@@ -503,18 +526,35 @@ func processUnavailableItems(ctx context.Context, tornClient *torn.Client, unava
 
 		key := fmt.Sprintf("%s|%s", crimeURL, userName)
 		if !existing[key] {
+			log.Debug().
+				Str("key", key).
+				Msg("Adding new item to sheet")
 			rows = append(rows, []interface{}{"", "", crimeURL, "", itemName, userName})
 		} else {
-			log.Debug().Str("key", key).Msg("Skipping duplicate entry")
+			log.Debug().
+				Str("key", key).
+				Msg("Skipping duplicate entry")
 		}
 	}
+
+	callsAfter := tornClient.GetAPICallCount()
+	log.Debug().
+		Int("total_items", len(unavailableItems)).
+		Int("new_rows", len(rows)).
+		Int64("api_calls", callsAfter-callsBefore).
+		Msg("Finished processing unavailable items")
 
 	return rows
 }
 
 func getItemDetails(ctx context.Context, tornClient *torn.Client, itemID int) string {
+	log.Debug().Int("item_id", itemID).Msg("Getting item details")
 	itemDetails, err := tornClient.GetItem(ctx, fmt.Sprintf("%d", itemID))
 	if err == nil {
+		log.Debug().
+			Int("item_id", itemID).
+			Str("name", itemDetails.Name).
+			Msg("Retrieved item details")
 		return itemDetails.Name
 	}
 	log.Warn().Err(err).Int("item_id", itemID).Msg("Failed to get item details")
@@ -522,8 +562,13 @@ func getItemDetails(ctx context.Context, tornClient *torn.Client, itemID int) st
 }
 
 func getUserDetails(ctx context.Context, tornClient *torn.Client, userID int) string {
+	log.Debug().Int("user_id", userID).Msg("Getting user details")
 	userDetails, err := tornClient.GetUser(ctx, fmt.Sprintf("%d", userID))
 	if err == nil {
+		log.Debug().
+			Int("user_id", userID).
+			Str("name", userDetails.Name).
+			Msg("Retrieved user details")
 		return userDetails.Name
 	}
 	log.Warn().Err(err).Int("user_id", userID).Msg("Failed to get user details")
@@ -531,6 +576,11 @@ func getUserDetails(ctx context.Context, tornClient *torn.Client, userID int) st
 }
 
 func updateSheet(ctx context.Context, sheetsClient *sheets.Client, rows [][]interface{}, totalItems int) {
+	log.Debug().
+		Int("rows", len(rows)).
+		Int("total_items", totalItems).
+		Msg("Updating sheet")
+
 	spreadsheetID := getRequiredEnv("SPREADSHEET_ID")
 	sheetRange := getEnvWithDefault("SPREADSHEET_RANGE", "Test Sheet!A1")
 
