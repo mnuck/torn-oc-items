@@ -18,3 +18,5 @@ Thumbs.db
 *.json
 !go.mod
 !go.sum 
+
+credentials.json
