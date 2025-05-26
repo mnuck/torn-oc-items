@@ -59,7 +59,7 @@ func initializeClients(ctx context.Context) (*torn.Client, *sheets.Client) {
 	log.Debug().Msg("Initializing clients")
 	apiKey := getRequiredEnv("TORN_API_KEY")
 	factionApiKey := getRequiredEnv("TORN_FACTION_API_KEY")
-	credsFile := "/credentials.json"
+	credsFile := "credentials.json"
 
 	tornClient := torn.NewClient(apiKey, factionApiKey)
 	sheetsClient, err := sheets.NewClient(ctx, credsFile)
@@ -91,7 +91,10 @@ func getUnavailableItems(ctx context.Context, tornClient *torn.Client) []torn.Un
 func readExistingSheetData(ctx context.Context, sheetsClient *sheets.Client) [][]interface{} {
 	log.Debug().Msg("Reading existing sheet data")
 	spreadsheetID := getRequiredEnv("SPREADSHEET_ID")
-	existingData, err := sheetsClient.ReadSheet(ctx, spreadsheetID, "Test Sheet!A1:Z1000")
+	sheetRange := getEnvWithDefault("SPREADSHEET_RANGE", "Test Sheet!A1")
+	// Extend range to Z1000 for reading all data
+	readRange := strings.Split(sheetRange, "!")[0] + "!A1:Z1000"
+	existingData, err := sheetsClient.ReadSheet(ctx, spreadsheetID, readRange)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to read existing sheet data")
 	}
@@ -400,6 +403,8 @@ func updateProvidedItemRows(ctx context.Context, sheetsClient *sheets.Client, up
 		Msg("Updating provided item rows")
 
 	spreadsheetID := getRequiredEnv("SPREADSHEET_ID")
+	sheetRange := getEnvWithDefault("SPREADSHEET_RANGE", "Test Sheet!A1")
+	sheetName := strings.Split(sheetRange, "!")[0]
 
 	for _, update := range updates {
 		log.Debug().
@@ -413,7 +418,7 @@ func updateProvidedItemRows(ctx context.Context, sheetsClient *sheets.Client, up
 		values := [][]interface{}{
 			{update.Provider},
 		}
-		bRange := fmt.Sprintf("Test Sheet!B%d", update.RowIndex)
+		bRange := fmt.Sprintf("%s!B%d", sheetName, update.RowIndex)
 		if err := sheetsClient.UpdateRange(ctx, spreadsheetID, bRange, values); err != nil {
 			log.Error().Err(err).Int("row", update.RowIndex).Msg("Failed to update provider column")
 			continue
@@ -422,7 +427,7 @@ func updateProvidedItemRows(ctx context.Context, sheetsClient *sheets.Client, up
 		values = [][]interface{}{
 			{update.DateTime},
 		}
-		dRange := fmt.Sprintf("Test Sheet!D%d", update.RowIndex)
+		dRange := fmt.Sprintf("%s!D%d", sheetName, update.RowIndex)
 		if err := sheetsClient.UpdateRange(ctx, spreadsheetID, dRange, values); err != nil {
 			log.Error().Err(err).Int("row", update.RowIndex).Msg("Failed to update datetime column")
 			continue
@@ -431,7 +436,7 @@ func updateProvidedItemRows(ctx context.Context, sheetsClient *sheets.Client, up
 		values = [][]interface{}{
 			{update.MarketValue},
 		}
-		gRange := fmt.Sprintf("Test Sheet!G%d", update.RowIndex)
+		gRange := fmt.Sprintf("%s!G%d", sheetName, update.RowIndex)
 		if err := sheetsClient.UpdateRange(ctx, spreadsheetID, gRange, values); err != nil {
 			log.Error().Err(err).Int("row", update.RowIndex).Msg("Failed to update market value column")
 			continue
@@ -527,6 +532,8 @@ func updateSheet(ctx context.Context, sheetsClient *sheets.Client, rows [][]inte
 
 	spreadsheetID := getRequiredEnv("SPREADSHEET_ID")
 	sheetRange := getEnvWithDefault("SPREADSHEET_RANGE", "Test Sheet!A1")
+
+	log.Debug().Str("sheet_range", sheetRange)
 
 	if err := sheetsClient.AppendRows(ctx, spreadsheetID, sheetRange, rows); err != nil {
 		log.Fatal().Err(err).Msg("Failed to append rows to sheet")
