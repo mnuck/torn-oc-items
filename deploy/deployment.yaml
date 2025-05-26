@@ -17,6 +17,11 @@ spec:
       containers:
       - name: torn-oc-items
         image: localhost:32000/torn-oc-items:0.0.1
+        env:
+        - name: LOGLEVEL
+          value: "warn"
+        - name: ENV
+          value: "production"
         securityContext:
           allowPrivilegeEscalation: false
           runAsNonRoot: true

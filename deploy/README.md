@@ -75,6 +75,25 @@ kubectl apply -f deployment.yaml
 - Container runs as non-root user (UID 1001)
 - Security contexts prevent privilege escalation
 
+## Environment Variables
+
+The application uses two types of environment variables:
+
+1. Non-sensitive variables in `deployment.yaml`:
+   - `LOGLEVEL`: Controls logging verbosity (default: "warn")
+   - `ENV`: Environment name (default: "production")
+  
+   These can be modified directly in the deployment file.
+
+2. Sensitive variables in Kubernetes secrets:
+   - `TORN_API_KEY`: Your Torn API key
+   - `TORN_FACTION_API_KEY`: Your Faction API key
+   - `SPREADSHEET_ID`: Google Sheets ID
+   - `SPREADSHEET_RANGE`: Sheet range to read/write
+   - `PROVIDER_KEYS`: Comma-separated provider API keys
+
+   These are stored in the `torn-oc-secrets` secret and must be updated using the process below.
+
 ## Modifying the .env File
 
 To modify the .env file after deployment:
