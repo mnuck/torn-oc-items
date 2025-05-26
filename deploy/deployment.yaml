@@ -16,7 +16,7 @@ spec:
         fsGroup: 1001
       containers:
       - name: torn-oc-items
-        image: localhost:32000/torn-oc-items:0.0.1
+        image: localhost:32000/torn-oc-items:0.0.2
         env:
         - name: LOGLEVEL
           value: "warn"
