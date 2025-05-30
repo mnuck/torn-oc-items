@@ -109,14 +109,18 @@ func buildExistingMap(existingData [][]interface{}) map[string]bool {
 		if len(row) >= 6 {
 			crimeURL := ""
 			userName := ""
+			itemName := ""
 			if len(row) > 2 && row[2] != nil {
 				crimeURL = fmt.Sprintf("%v", row[2])
+			}
+			if len(row) > 4 && row[4] != nil {
+				itemName = fmt.Sprintf("%v", row[4])
 			}
 			if len(row) > 5 && row[5] != nil {
 				userName = fmt.Sprintf("%v", row[5])
 			}
-			if crimeURL != "" && userName != "" {
-				key := fmt.Sprintf("%s|%s", crimeURL, userName)
+			if crimeURL != "" && userName != "" && itemName != "" {
+				key := fmt.Sprintf("%s|%s|%s", crimeURL, userName, itemName)
 				existing[key] = true
 			}
 		}
@@ -473,7 +477,7 @@ func processUnavailableItems(ctx context.Context, tornClient *torn.Client, unava
 			Str("crime_url", crimeURL).
 			Msg("Unavailable item")
 
-		key := fmt.Sprintf("%s|%s", crimeURL, userName)
+		key := fmt.Sprintf("%s|%s|%s", crimeURL, userName, itemName)
 		if !existing[key] {
 			log.Debug().
 				Str("key", key).

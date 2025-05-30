@@ -288,16 +288,63 @@ func (c *Client) GetFactionCrimes(ctx context.Context, category string, offset i
 }
 
 func (c *Client) GetUnavailableItems(ctx context.Context) ([]UnavailableItem, error) {
+	log.Debug().Msg("Fetching faction crimes for unavailable items")
 	crimesResp, err := c.GetFactionCrimes(ctx, "planning", 0)
 	if err != nil {
+		log.Error().Err(err).Msg("Failed to get planning crimes")
 		return nil, fmt.Errorf("failed to get planning crimes: %w", err)
 	}
+
+	log.Debug().
+		Int("total_crimes", len(crimesResp.Crimes)).
+		Msg("Retrieved faction crimes")
 
 	var unavailableItems []UnavailableItem
 
 	for _, crime := range crimesResp.Crimes {
-		for _, slot := range crime.Slots {
+		log.Debug().
+			Int("crime_id", crime.ID).
+			Str("crime_name", crime.Name).
+			Str("crime_status", crime.Status).
+			Int("slots", len(crime.Slots)).
+			Msg("Processing crime")
+
+		for slotIndex, slot := range crime.Slots {
+			log.Debug().
+				Int("crime_id", crime.ID).
+				Int("slot_index", slotIndex).
+				Str("position", slot.Position).
+				Bool("has_item_requirement", slot.ItemRequirement != nil).
+				Bool("has_user", slot.User != nil).
+				Msg("Processing slot")
+
+			if slot.ItemRequirement != nil {
+				log.Debug().
+					Int("crime_id", crime.ID).
+					Int("slot_index", slotIndex).
+					Int("item_id", slot.ItemRequirement.ID).
+					Bool("is_reusable", slot.ItemRequirement.IsReusable).
+					Bool("is_available", slot.ItemRequirement.IsAvailable).
+					Msg("Item requirement details")
+			}
+
+			if slot.User != nil {
+				log.Debug().
+					Int("crime_id", crime.ID).
+					Int("slot_index", slotIndex).
+					Int("user_id", slot.User.ID).
+					Float64("progress", slot.User.Progress).
+					Msg("User details")
+			}
+
 			if slot.ItemRequirement != nil && !slot.ItemRequirement.IsAvailable && slot.User != nil {
+				log.Info().
+					Int("crime_id", crime.ID).
+					Int("slot_index", slotIndex).
+					Int("item_id", slot.ItemRequirement.ID).
+					Int("user_id", slot.User.ID).
+					Msg("Found unavailable item")
+
 				unavailableItems = append(unavailableItems, UnavailableItem{
 					ItemID:  slot.ItemRequirement.ID,
 					UserID:  slot.User.ID,
@@ -306,6 +353,10 @@ func (c *Client) GetUnavailableItems(ctx context.Context) ([]UnavailableItem, er
 			}
 		}
 	}
+
+	log.Debug().
+		Int("total_unavailable_items", len(unavailableItems)).
+		Msg("Finished processing unavailable items")
 
 	return unavailableItems, nil
 }
