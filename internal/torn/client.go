@@ -337,7 +337,17 @@ func (c *Client) GetSuppliedItems(ctx context.Context) ([]SuppliedItem, error) {
 					Msg("User details")
 			}
 
-			if slot.ItemRequirement != nil && !slot.ItemRequirement.IsAvailable && slot.User != nil {
+			// early exit if there is no item requirement
+			if slot.ItemRequirement == nil {
+				continue
+			}
+
+			// if the item is not reusable, we will always provide it
+			// if the item is reusable, we will only provide it if it is not available
+			supplied := !slot.ItemRequirement.IsReusable ||
+				(slot.ItemRequirement.IsReusable && !slot.ItemRequirement.IsAvailable)
+
+			if supplied && slot.User != nil {
 				log.Info().
 					Int("crime_id", crime.ID).
 					Int("slot_index", slotIndex).

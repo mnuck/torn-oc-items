@@ -418,8 +418,17 @@ func updateProvidedItemRows(ctx context.Context, sheetsClient *sheets.Client, up
 			Float64("market_value", update.MarketValue).
 			Msg("Updating row")
 
-		// Update individual cells: B (provider), D (datetime), G (market value)
+		// Update individual cells: A (status), B (provider), D (datetime), G (market value)
 		values := [][]interface{}{
+			{"Provided"},
+		}
+		aRange := fmt.Sprintf("%s!A%d", sheetName, update.RowIndex)
+		if err := sheetsClient.UpdateRange(ctx, spreadsheetID, aRange, values); err != nil {
+			log.Error().Err(err).Int("row", update.RowIndex).Msg("Failed to update status column")
+			continue
+		}
+
+		values = [][]interface{}{
 			{update.Provider},
 		}
 		bRange := fmt.Sprintf("%s!B%d", sheetName, update.RowIndex)
@@ -482,7 +491,8 @@ func processSuppliedItems(ctx context.Context, tornClient *torn.Client, supplied
 			log.Debug().
 				Str("key", key).
 				Msg("Adding new item to sheet")
-			rows = append(rows, []interface{}{"", "", crimeURL, "", itemName, userName})
+			formula := "=IF(OR(INDIRECT(\"A\"&ROW())=\"Provided\",INDIRECT(\"A\"&ROW())=\"Cash Sent\"), INDIRECT(\"G\"&ROW()), 0)"
+			rows = append(rows, []interface{}{"Needed", "", crimeURL, "", itemName, userName, "", formula})
 		} else {
 			log.Debug().
 				Str("key", key).
