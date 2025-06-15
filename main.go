@@ -71,21 +71,21 @@ func initializeClients(ctx context.Context) (*torn.Client, *sheets.Client) {
 	return tornClient, sheetsClient
 }
 
-func getUnavailableItems(ctx context.Context, tornClient *torn.Client) []torn.UnavailableItem {
-	log.Debug().Msg("Fetching unavailable items")
+func getSuppliedItems(ctx context.Context, tornClient *torn.Client) []torn.SuppliedItem {
+	log.Debug().Msg("Fetching supplied items")
 	callsBefore := tornClient.GetAPICallCount()
 
-	unavailableItems, err := tornClient.GetUnavailableItems(ctx)
+	suppliedItems, err := tornClient.GetSuppliedItems(ctx)
 	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to get unavailable items")
+		log.Fatal().Err(err).Msg("Failed to get supplied items")
 	}
 
 	callsAfter := tornClient.GetAPICallCount()
 	log.Debug().
-		Int("count", len(unavailableItems)).
+		Int("count", len(suppliedItems)).
 		Int64("api_calls", callsAfter-callsBefore).
-		Msg("Retrieved unavailable items")
-	return unavailableItems
+		Msg("Retrieved supplied items")
+	return suppliedItems
 }
 
 func readExistingSheetData(ctx context.Context, sheetsClient *sheets.Client) [][]interface{} {
@@ -135,30 +135,30 @@ func runProcessLoop(ctx context.Context, tornClient *torn.Client, sheetsClient *
 	// Reset API call counter at the start
 	tornClient.ResetAPICallCount()
 
-	// Process new unavailable items
-	unavailableItems := getUnavailableItems(ctx, tornClient)
-	apiCallsAfterUnavailable := tornClient.GetAPICallCount()
+	// Process new supplied items
+	suppliedItems := getSuppliedItems(ctx, tornClient)
+	apiCallsAfterSupplied := tornClient.GetAPICallCount()
 
-	if len(unavailableItems) > 0 {
-		log.Debug().Int("count", len(unavailableItems)).Msg("Processing new unavailable items")
+	if len(suppliedItems) > 0 {
+		log.Debug().Int("count", len(suppliedItems)).Msg("Processing new supplied items")
 		existingData := readExistingSheetData(ctx, sheetsClient)
 		existing := buildExistingMap(existingData)
 
-		rows := processUnavailableItems(ctx, tornClient, unavailableItems, existing)
+		rows := processSuppliedItems(ctx, tornClient, suppliedItems, existing)
 		apiCallsAfterProcessing := tornClient.GetAPICallCount()
 
 		if len(rows) > 0 {
 			log.Debug().Int("rows", len(rows)).Msg("Updating sheet with new items")
-			updateSheet(ctx, sheetsClient, rows, len(unavailableItems))
+			updateSheet(ctx, sheetsClient, rows, len(suppliedItems))
 		} else {
 			log.Debug().Msg("No new items to add to sheet")
 		}
 
 		log.Info().
-			Int64("api_calls_processing_unavailable", apiCallsAfterProcessing-apiCallsAfterUnavailable).
-			Msg("API calls for processUnavailableItems()")
+			Int64("api_calls_processing_supplied", apiCallsAfterProcessing-apiCallsAfterSupplied).
+			Msg("API calls for processSuppliedItems()")
 	} else {
-		log.Debug().Msg("No unavailable items found")
+		log.Debug().Msg("No supplied items found")
 	}
 
 	// Process provided items
@@ -169,7 +169,7 @@ func runProcessLoop(ctx context.Context, tornClient *torn.Client, sheetsClient *
 
 	totalAPICalls := tornClient.GetAPICallCount()
 	log.Debug().
-		Int64("api_calls_get_unavailable", apiCallsAfterUnavailable).
+		Int64("api_calls_get_supplied", apiCallsAfterSupplied).
 		Int64("api_calls_process_provided", apiCallsAfterProvided-apiCallsBeforeProvided).
 		Int64("total_api_calls_this_loop", totalAPICalls).
 		Msg("API call summary for runProcessLoop()")
@@ -459,12 +459,12 @@ func updateProvidedItemRows(ctx context.Context, sheetsClient *sheets.Client, up
 		Msg("Finished updating provided item rows")
 }
 
-func processUnavailableItems(ctx context.Context, tornClient *torn.Client, unavailableItems []torn.UnavailableItem, existing map[string]bool) [][]interface{} {
-	log.Debug().Int("count", len(unavailableItems)).Msg("Processing unavailable items")
+func processSuppliedItems(ctx context.Context, tornClient *torn.Client, suppliedItems []torn.SuppliedItem, existing map[string]bool) [][]interface{} {
+	log.Debug().Int("count", len(suppliedItems)).Msg("Processing supplied items")
 	callsBefore := tornClient.GetAPICallCount()
 	var rows [][]interface{}
 
-	for _, itm := range unavailableItems {
+	for _, itm := range suppliedItems {
 		crimeURL := fmt.Sprintf("http://www.torn.com/factions.php?step=your#/tab=crimes&crimeId=%d", itm.CrimeID)
 
 		itemName := getItemDetails(ctx, tornClient, itm.ItemID)
@@ -475,7 +475,7 @@ func processUnavailableItems(ctx context.Context, tornClient *torn.Client, unava
 			Str("item", itemName).
 			Str("user", userName).
 			Str("crime_url", crimeURL).
-			Msg("Unavailable item")
+			Msg("Supplied item")
 
 		key := fmt.Sprintf("%s|%s|%s", crimeURL, userName, itemName)
 		if !existing[key] {
@@ -492,10 +492,10 @@ func processUnavailableItems(ctx context.Context, tornClient *torn.Client, unava
 
 	callsAfter := tornClient.GetAPICallCount()
 	log.Debug().
-		Int("total_items", len(unavailableItems)).
+		Int("total_items", len(suppliedItems)).
 		Int("new_rows", len(rows)).
 		Int64("api_calls", callsAfter-callsBefore).
-		Msg("Finished processing unavailable items")
+		Msg("Finished processing supplied items")
 
 	return rows
 }

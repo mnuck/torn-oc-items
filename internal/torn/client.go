@@ -87,7 +87,7 @@ type CrimesResponse struct {
 	Crimes []Crime `json:"crimes"`
 }
 
-type UnavailableItem struct {
+type SuppliedItem struct {
 	ItemID  int `json:"item_id"`
 	UserID  int `json:"user_id"`
 	CrimeID int `json:"crime_id"`
@@ -287,8 +287,8 @@ func (c *Client) GetFactionCrimes(ctx context.Context, category string, offset i
 	return &crimesResp, nil
 }
 
-func (c *Client) GetUnavailableItems(ctx context.Context) ([]UnavailableItem, error) {
-	log.Debug().Msg("Fetching faction crimes for unavailable items")
+func (c *Client) GetSuppliedItems(ctx context.Context) ([]SuppliedItem, error) {
+	log.Debug().Msg("Fetching faction crimes for supplied items")
 	crimesResp, err := c.GetFactionCrimes(ctx, "planning", 0)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to get planning crimes")
@@ -299,7 +299,7 @@ func (c *Client) GetUnavailableItems(ctx context.Context) ([]UnavailableItem, er
 		Int("total_crimes", len(crimesResp.Crimes)).
 		Msg("Retrieved faction crimes")
 
-	var unavailableItems []UnavailableItem
+	var suppliedItems []SuppliedItem
 
 	for _, crime := range crimesResp.Crimes {
 		log.Debug().
@@ -343,9 +343,9 @@ func (c *Client) GetUnavailableItems(ctx context.Context) ([]UnavailableItem, er
 					Int("slot_index", slotIndex).
 					Int("item_id", slot.ItemRequirement.ID).
 					Int("user_id", slot.User.ID).
-					Msg("Found unavailable item")
+					Msg("Found supplied item")
 
-				unavailableItems = append(unavailableItems, UnavailableItem{
+				suppliedItems = append(suppliedItems, SuppliedItem{
 					ItemID:  slot.ItemRequirement.ID,
 					UserID:  slot.User.ID,
 					CrimeID: crime.ID,
@@ -355,10 +355,10 @@ func (c *Client) GetUnavailableItems(ctx context.Context) ([]UnavailableItem, er
 	}
 
 	log.Debug().
-		Int("total_unavailable_items", len(unavailableItems)).
-		Msg("Finished processing unavailable items")
+		Int("total_supplied_items", len(suppliedItems)).
+		Msg("Finished processing supplied items")
 
-	return unavailableItems, nil
+	return suppliedItems, nil
 }
 
 func (c *Client) GetItemSendLogs(ctx context.Context) (*LogResponse, error) {
