@@ -1,17 +1,21 @@
-package main
+package app
 
 import (
+	"context"
 	"os"
 	"strings"
 	"time"
+
+	"torn_oc_items/internal/sheets"
+	"torn_oc_items/internal/torn"
 
 	"github.com/joho/godotenv"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
-// setupEnvironment loads .env file and configures zerolog output and log level.
-func setupEnvironment() {
+// SetupEnvironment loads .env file and configures zerolog output and log level.
+func SetupEnvironment() {
 	// Load .env file if it exists
 	err := godotenv.Load()
 
@@ -59,8 +63,8 @@ func setupEnvironment() {
 	}
 }
 
-// getRequiredEnv fetches a required environment variable or exits if not set.
-func getRequiredEnv(key string) string {
+// GetRequiredEnv fetches a required environment variable or exits if not set.
+func GetRequiredEnv(key string) string {
 	value := os.Getenv(key)
 	if value == "" {
 		log.Fatal().Msgf("%s environment variable is required", key)
@@ -68,11 +72,28 @@ func getRequiredEnv(key string) string {
 	return value
 }
 
-// getEnvWithDefault fetches an environment variable with a default fallback.
-func getEnvWithDefault(key, defaultValue string) string {
+// GetEnvWithDefault fetches an environment variable with a default fallback.
+func GetEnvWithDefault(key, defaultValue string) string {
 	value := os.Getenv(key)
 	if value == "" {
 		return defaultValue
 	}
 	return value
+}
+
+// InitializeClients creates and returns the Torn API client and Google Sheets client
+func InitializeClients(ctx context.Context) (*torn.Client, *sheets.Client) {
+	log.Debug().Msg("Initializing clients")
+	apiKey := GetRequiredEnv("TORN_API_KEY")
+	factionApiKey := GetRequiredEnv("TORN_FACTION_API_KEY")
+	credsFile := "credentials.json"
+
+	tornClient := torn.NewClient(apiKey, factionApiKey)
+	sheetsClient, err := sheets.NewClient(ctx, credsFile)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to create sheets client")
+	}
+
+	log.Debug().Msg("Clients initialized successfully")
+	return tornClient, sheetsClient
 }
