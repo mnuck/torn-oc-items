@@ -217,53 +217,13 @@ func parseSheetItems(existingData [][]interface{}) []SheetItem {
 	var items []SheetItem
 
 	for i, row := range existingData {
-		if len(row) < 6 {
-			log.Debug().
-				Int("row", i+1).
-				Int("columns", len(row)).
-				Msg("Skipping row with insufficient columns")
+		if !isValidSheetRow(row, i+1) {
 			continue
 		}
 
-		// Check if provider column (B) is blank
-		provider := ""
-		hasProvider := false
-		if len(row) > 1 && row[1] != nil {
-			provider = strings.TrimSpace(fmt.Sprintf("%v", row[1]))
-			hasProvider = provider != ""
-		}
-
-		// Extract other information
-		crimeURL := ""
-		itemName := ""
-		userName := ""
-
-		if len(row) > 2 && row[2] != nil {
-			crimeURL = fmt.Sprintf("%v", row[2])
-		}
-		if len(row) > 4 && row[4] != nil {
-			itemName = fmt.Sprintf("%v", row[4])
-		}
-		if len(row) > 5 && row[5] != nil {
-			userName = fmt.Sprintf("%v", row[5])
-		}
-
-		if crimeURL != "" && itemName != "" && userName != "" {
-			items = append(items, SheetItem{
-				RowIndex:    i + 1, // 1-indexed for sheets
-				CrimeURL:    crimeURL,
-				ItemName:    itemName,
-				UserName:    userName,
-				Provider:    provider,
-				HasProvider: hasProvider,
-			})
-		} else {
-			log.Debug().
-				Int("row", i+1).
-				Str("crime_url", crimeURL).
-				Str("item_name", itemName).
-				Str("user_name", userName).
-				Msg("Skipping row with missing required fields")
+		sheetItem := extractSheetItemFromRow(row, i+1)
+		if validateSheetItem(sheetItem, i+1) {
+			items = append(items, sheetItem)
 		}
 	}
 
@@ -275,6 +235,66 @@ func parseSheetItems(existingData [][]interface{}) []SheetItem {
 	return items
 }
 
+// isValidSheetRow checks if a row has sufficient columns
+func isValidSheetRow(row []interface{}, rowNum int) bool {
+	if len(row) < 6 {
+		log.Debug().
+			Int("row", rowNum).
+			Int("columns", len(row)).
+			Msg("Skipping row with insufficient columns")
+		return false
+	}
+	return true
+}
+
+// extractSheetItemFromRow extracts all fields from a sheet row
+func extractSheetItemFromRow(row []interface{}, rowIndex int) SheetItem {
+	// Extract provider information
+	provider := ""
+	hasProvider := false
+	if len(row) > 1 && row[1] != nil {
+		provider = strings.TrimSpace(fmt.Sprintf("%v", row[1]))
+		hasProvider = provider != ""
+	}
+
+	// Extract other fields
+	crimeURL := extractStringField(row, 2)
+	itemName := extractStringField(row, 4)
+	userName := extractStringField(row, 5)
+
+	return SheetItem{
+		RowIndex:    rowIndex,
+		CrimeURL:    crimeURL,
+		ItemName:    itemName,
+		UserName:    userName,
+		Provider:    provider,
+		HasProvider: hasProvider,
+	}
+}
+
+// extractStringField safely extracts a string field from a row at the given index
+func extractStringField(row []interface{}, index int) string {
+	if len(row) > index && row[index] != nil {
+		return fmt.Sprintf("%v", row[index])
+	}
+	return ""
+}
+
+// validateSheetItem checks if a sheet item has all required fields
+func validateSheetItem(item SheetItem, rowNum int) bool {
+	if item.CrimeURL != "" && item.ItemName != "" && item.UserName != "" {
+		return true
+	}
+
+	log.Debug().
+		Int("row", rowNum).
+		Str("crime_url", item.CrimeURL).
+		Str("item_name", item.ItemName).
+		Str("user_name", item.UserName).
+		Msg("Skipping row with missing required fields")
+	return false
+}
+
 func findProviderUpdates(ctx context.Context, tornClient *torn.Client, sheetItems []SheetItem, logResp *torn.LogResponse) []SheetRowUpdate {
 	var updates []SheetRowUpdate
 
@@ -284,54 +304,9 @@ func findProviderUpdates(ctx context.Context, tornClient *torn.Client, sheetItem
 		Msg("Starting provider update matching")
 
 	for combinedID, logEntry := range logResp.Log {
-		// combinedID format: providerName|logID
-		parts := strings.SplitN(combinedID, "|", 2)
-		providerName := "Unknown"
-		if len(parts) == 2 {
-			providerName = parts[0]
-		}
-
-		receiverID := logEntry.Data.Receiver
-		receiverName := getUserNameByID(ctx, tornClient, receiverID)
-		if receiverName == "" {
-			continue
-		}
-
-		for _, logItem := range logEntry.Data.Items {
-			itemID := logItem.ID
-			itemName := getItemNameByID(ctx, tornClient, itemID)
-			if itemName == "" {
-				continue
-			}
-
-			for _, sheetItem := range sheetItems {
-				if !sheetItem.HasProvider &&
-					matchesUser(sheetItem.UserName, receiverName, receiverID) &&
-					matchesItem(sheetItem.ItemName, itemName, itemID) {
-
-					marketValue := getItemMarketValue(ctx, tornClient, itemID)
-					timestamp := time.Unix(logEntry.Timestamp, 0)
-					dateTime := timestamp.Format("15:04:05 - 02/01/06")
-
-					updates = append(updates, SheetRowUpdate{
-						RowIndex:    sheetItem.RowIndex,
-						Provider:    providerName,
-						DateTime:    dateTime,
-						MarketValue: marketValue,
-					})
-
-					log.Info().
-						Int("row", sheetItem.RowIndex).
-						Str("item", sheetItem.ItemName).
-						Str("user", sheetItem.UserName).
-						Str("provider", providerName).
-						Float64("market_value", marketValue).
-						Msg("Found provided item match")
-
-					break
-				}
-			}
-		}
+		providerName := extractProviderName(combinedID)
+		logEntryUpdates := processLogEntryForUpdates(ctx, tornClient, logEntry, providerName, sheetItems)
+		updates = append(updates, logEntryUpdates...)
 	}
 
 	log.Debug().
@@ -339,6 +314,80 @@ func findProviderUpdates(ctx context.Context, tornClient *torn.Client, sheetItem
 		Msg("Completed provider update matching")
 
 	return updates
+}
+
+// extractProviderName extracts the provider name from combinedID format: providerName|logID
+func extractProviderName(combinedID string) string {
+	parts := strings.SplitN(combinedID, "|", 2)
+	if len(parts) == 2 {
+		return parts[0]
+	}
+	return "Unknown"
+}
+
+// processLogEntryForUpdates processes a single log entry and returns any updates found
+func processLogEntryForUpdates(ctx context.Context, tornClient *torn.Client, logEntry torn.LogEntry, providerName string, sheetItems []SheetItem) []SheetRowUpdate {
+	var updates []SheetRowUpdate
+
+	receiverID := logEntry.Data.Receiver
+	receiverName := getUserNameByID(ctx, tornClient, receiverID)
+	if receiverName == "" {
+		return updates
+	}
+
+	for _, logItem := range logEntry.Data.Items {
+		itemUpdates := processLogItemForUpdates(ctx, tornClient, logItem, logEntry.Timestamp, receiverName, receiverID, providerName, sheetItems)
+		updates = append(updates, itemUpdates...)
+	}
+
+	return updates
+}
+
+// processLogItemForUpdates processes a single log item and returns any updates found
+func processLogItemForUpdates(ctx context.Context, tornClient *torn.Client, logItem torn.LogItem, timestamp int64, receiverName string, receiverID int, providerName string, sheetItems []SheetItem) []SheetRowUpdate {
+	var updates []SheetRowUpdate
+
+	itemID := logItem.ID
+	itemName := getItemNameByID(ctx, tornClient, itemID)
+	if itemName == "" {
+		return updates
+	}
+
+	for _, sheetItem := range sheetItems {
+		if !sheetItem.HasProvider &&
+			matchesUser(sheetItem.UserName, receiverName, receiverID) &&
+			matchesItem(sheetItem.ItemName, itemName, itemID) {
+
+			update := createSheetRowUpdate(ctx, tornClient, sheetItem, itemID, timestamp, providerName)
+			updates = append(updates, update)
+
+			log.Info().
+				Int("row", sheetItem.RowIndex).
+				Str("item", sheetItem.ItemName).
+				Str("user", sheetItem.UserName).
+				Str("provider", providerName).
+				Float64("market_value", update.MarketValue).
+				Msg("Found provided item match")
+
+			break
+		}
+	}
+
+	return updates
+}
+
+// createSheetRowUpdate creates a SheetRowUpdate with market value and formatted timestamp
+func createSheetRowUpdate(ctx context.Context, tornClient *torn.Client, sheetItem SheetItem, itemID int, timestamp int64, providerName string) SheetRowUpdate {
+	marketValue := getItemMarketValue(ctx, tornClient, itemID)
+	timestampTime := time.Unix(timestamp, 0)
+	dateTime := timestampTime.Format("15:04:05 - 02/01/06")
+
+	return SheetRowUpdate{
+		RowIndex:    sheetItem.RowIndex,
+		Provider:    providerName,
+		DateTime:    dateTime,
+		MarketValue: marketValue,
+	}
 }
 
 func getUserNameByID(ctx context.Context, tornClient *torn.Client, userID int) string {
@@ -418,54 +467,57 @@ func updateProvidedItemRows(ctx context.Context, sheetsClient *sheets.Client, up
 			Float64("market_value", update.MarketValue).
 			Msg("Updating row")
 
-		// Update individual cells: A (status), B (provider), D (datetime), G (market value)
-		values := [][]interface{}{
-			{"Provided"},
+		if updateAllSheetCells(ctx, sheetsClient, spreadsheetID, sheetName, update) {
+			log.Info().
+				Int("row", update.RowIndex).
+				Str("provider", update.Provider).
+				Str("datetime", update.DateTime).
+				Float64("market_value", update.MarketValue).
+				Msg("Updated provided item row")
 		}
-		aRange := fmt.Sprintf("%s!A%d", sheetName, update.RowIndex)
-		if err := sheetsClient.UpdateRange(ctx, spreadsheetID, aRange, values); err != nil {
-			log.Error().Err(err).Int("row", update.RowIndex).Msg("Failed to update status column")
-			continue
-		}
-
-		values = [][]interface{}{
-			{update.Provider},
-		}
-		bRange := fmt.Sprintf("%s!B%d", sheetName, update.RowIndex)
-		if err := sheetsClient.UpdateRange(ctx, spreadsheetID, bRange, values); err != nil {
-			log.Error().Err(err).Int("row", update.RowIndex).Msg("Failed to update provider column")
-			continue
-		}
-
-		values = [][]interface{}{
-			{update.DateTime},
-		}
-		dRange := fmt.Sprintf("%s!D%d", sheetName, update.RowIndex)
-		if err := sheetsClient.UpdateRange(ctx, spreadsheetID, dRange, values); err != nil {
-			log.Error().Err(err).Int("row", update.RowIndex).Msg("Failed to update datetime column")
-			continue
-		}
-
-		values = [][]interface{}{
-			{update.MarketValue},
-		}
-		gRange := fmt.Sprintf("%s!G%d", sheetName, update.RowIndex)
-		if err := sheetsClient.UpdateRange(ctx, spreadsheetID, gRange, values); err != nil {
-			log.Error().Err(err).Int("row", update.RowIndex).Msg("Failed to update market value column")
-			continue
-		}
-
-		log.Info().
-			Int("row", update.RowIndex).
-			Str("provider", update.Provider).
-			Str("datetime", update.DateTime).
-			Float64("market_value", update.MarketValue).
-			Msg("Updated provided item row")
 	}
 
 	log.Debug().
 		Int("updates", len(updates)).
 		Msg("Finished updating provided item rows")
+}
+
+// updateAllSheetCells updates all required cells for a provided item row
+func updateAllSheetCells(ctx context.Context, sheetsClient *sheets.Client, spreadsheetID, sheetName string, update SheetRowUpdate) bool {
+	// Update status column (A)
+	if !updateSheetCell(ctx, sheetsClient, spreadsheetID, sheetName, "A", update.RowIndex, "Provided", "status") {
+		return false
+	}
+
+	// Update provider column (B)
+	if !updateSheetCell(ctx, sheetsClient, spreadsheetID, sheetName, "B", update.RowIndex, update.Provider, "provider") {
+		return false
+	}
+
+	// Update datetime column (D)
+	if !updateSheetCell(ctx, sheetsClient, spreadsheetID, sheetName, "D", update.RowIndex, update.DateTime, "datetime") {
+		return false
+	}
+
+	// Update market value column (G)
+	if !updateSheetCell(ctx, sheetsClient, spreadsheetID, sheetName, "G", update.RowIndex, update.MarketValue, "market value") {
+		return false
+	}
+
+	return true
+}
+
+// updateSheetCell updates a single cell in the sheet
+func updateSheetCell(ctx context.Context, sheetsClient *sheets.Client, spreadsheetID, sheetName, column string, rowIndex int, value interface{}, columnDescription string) bool {
+	values := [][]interface{}{
+		{value},
+	}
+	cellRange := fmt.Sprintf("%s!%s%d", sheetName, column, rowIndex)
+	if err := sheetsClient.UpdateRange(ctx, spreadsheetID, cellRange, values); err != nil {
+		log.Error().Err(err).Int("row", rowIndex).Str("column", column).Msgf("Failed to update %s column", columnDescription)
+		return false
+	}
+	return true
 }
 
 func processSuppliedItems(ctx context.Context, tornClient *torn.Client, suppliedItems []torn.SuppliedItem, existing map[string]bool) [][]interface{} {

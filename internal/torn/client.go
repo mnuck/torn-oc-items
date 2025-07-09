@@ -316,76 +316,119 @@ func (c *Client) GetSuppliedItems(ctx context.Context) ([]SuppliedItem, error) {
 		Int("total_crimes", len(crimesResp.Crimes)).
 		Msg("Retrieved faction crimes")
 
-	var suppliedItems []SuppliedItem
-
-	for _, crime := range crimesResp.Crimes {
-		log.Debug().
-			Int("crime_id", crime.ID).
-			Str("crime_name", crime.Name).
-			Str("crime_status", crime.Status).
-			Int("slots", len(crime.Slots)).
-			Msg("Processing crime")
-
-		for slotIndex, slot := range crime.Slots {
-			log.Debug().
-				Int("crime_id", crime.ID).
-				Int("slot_index", slotIndex).
-				Str("position", slot.Position).
-				Bool("has_item_requirement", slot.ItemRequirement != nil).
-				Bool("has_user", slot.User != nil).
-				Msg("Processing slot")
-
-			if slot.ItemRequirement != nil {
-				log.Debug().
-					Int("crime_id", crime.ID).
-					Int("slot_index", slotIndex).
-					Int("item_id", slot.ItemRequirement.ID).
-					Bool("is_reusable", slot.ItemRequirement.IsReusable).
-					Bool("is_available", slot.ItemRequirement.IsAvailable).
-					Msg("Item requirement details")
-			}
-
-			if slot.User != nil {
-				log.Debug().
-					Int("crime_id", crime.ID).
-					Int("slot_index", slotIndex).
-					Int("user_id", slot.User.ID).
-					Float64("progress", slot.User.Progress).
-					Msg("User details")
-			}
-
-			// early exit if there is no item requirement
-			if slot.ItemRequirement == nil {
-				continue
-			}
-
-			// if the item is not reusable, we will always provide it
-			// if the item is reusable, we will only provide it if it is not available
-			supplied := !slot.ItemRequirement.IsReusable ||
-				(slot.ItemRequirement.IsReusable && !slot.ItemRequirement.IsAvailable)
-
-			if supplied && slot.User != nil {
-				log.Info().
-					Int("crime_id", crime.ID).
-					Int("slot_index", slotIndex).
-					Int("item_id", slot.ItemRequirement.ID).
-					Int("user_id", slot.User.ID).
-					Msg("Found supplied item")
-
-				suppliedItems = append(suppliedItems, SuppliedItem{
-					ItemID:  slot.ItemRequirement.ID,
-					UserID:  slot.User.ID,
-					CrimeID: crime.ID,
-				})
-			}
-		}
-	}
+	suppliedItems := c.processCrimesForSuppliedItems(crimesResp.Crimes)
 
 	log.Debug().
 		Int("total_supplied_items", len(suppliedItems)).
 		Msg("Finished processing supplied items")
 
 	return suppliedItems, nil
+}
+
+// processCrimesForSuppliedItems processes all crimes and returns supplied items
+func (c *Client) processCrimesForSuppliedItems(crimes []Crime) []SuppliedItem {
+	var suppliedItems []SuppliedItem
+
+	for _, crime := range crimes {
+		c.logCrimeProcessing(crime)
+		crimeSuppliedItems := c.processCrimeSlots(crime)
+		suppliedItems = append(suppliedItems, crimeSuppliedItems...)
+	}
+
+	return suppliedItems
+}
+
+// logCrimeProcessing logs information about the crime being processed
+func (c *Client) logCrimeProcessing(crime Crime) {
+	log.Debug().
+		Int("crime_id", crime.ID).
+		Str("crime_name", crime.Name).
+		Str("crime_status", crime.Status).
+		Int("slots", len(crime.Slots)).
+		Msg("Processing crime")
+}
+
+// processCrimeSlots processes all slots in a crime and returns supplied items
+func (c *Client) processCrimeSlots(crime Crime) []SuppliedItem {
+	var suppliedItems []SuppliedItem
+
+	for slotIndex, slot := range crime.Slots {
+		c.logSlotProcessing(crime.ID, slotIndex, slot)
+
+		if suppliedItem := c.processSlotForSuppliedItem(crime.ID, slotIndex, slot); suppliedItem != nil {
+			suppliedItems = append(suppliedItems, *suppliedItem)
+		}
+	}
+
+	return suppliedItems
+}
+
+// logSlotProcessing logs detailed information about slot processing
+func (c *Client) logSlotProcessing(crimeID, slotIndex int, slot Slot) {
+	log.Debug().
+		Int("crime_id", crimeID).
+		Int("slot_index", slotIndex).
+		Str("position", slot.Position).
+		Bool("has_item_requirement", slot.ItemRequirement != nil).
+		Bool("has_user", slot.User != nil).
+		Msg("Processing slot")
+
+	if slot.ItemRequirement != nil {
+		log.Debug().
+			Int("crime_id", crimeID).
+			Int("slot_index", slotIndex).
+			Int("item_id", slot.ItemRequirement.ID).
+			Bool("is_reusable", slot.ItemRequirement.IsReusable).
+			Bool("is_available", slot.ItemRequirement.IsAvailable).
+			Msg("Item requirement details")
+	}
+
+	if slot.User != nil {
+		log.Debug().
+			Int("crime_id", crimeID).
+			Int("slot_index", slotIndex).
+			Int("user_id", slot.User.ID).
+			Float64("progress", slot.User.Progress).
+			Msg("User details")
+	}
+}
+
+// processSlotForSuppliedItem processes a single slot and returns a supplied item if conditions are met
+func (c *Client) processSlotForSuppliedItem(crimeID, slotIndex int, slot Slot) *SuppliedItem {
+	// Early exit if there is no item requirement
+	if slot.ItemRequirement == nil {
+		return nil
+	}
+
+	// Check if item should be supplied based on reusability and availability
+	if !c.shouldSupplyItem(slot.ItemRequirement) {
+		return nil
+	}
+
+	// Must have a user to supply the item to
+	if slot.User == nil {
+		return nil
+	}
+
+	log.Info().
+		Int("crime_id", crimeID).
+		Int("slot_index", slotIndex).
+		Int("item_id", slot.ItemRequirement.ID).
+		Int("user_id", slot.User.ID).
+		Msg("Found supplied item")
+
+	return &SuppliedItem{
+		ItemID:  slot.ItemRequirement.ID,
+		UserID:  slot.User.ID,
+		CrimeID: crimeID,
+	}
+}
+
+// shouldSupplyItem determines if an item should be supplied based on its requirements
+func (c *Client) shouldSupplyItem(requirement *ItemRequirement) bool {
+	// If the item is not reusable, we will always provide it
+	// If the item is reusable, we will only provide it if it is not available
+	return !requirement.IsReusable || (requirement.IsReusable && !requirement.IsAvailable)
 }
 
 func (c *Client) GetItemSendLogs(ctx context.Context) (*LogResponse, error) {
