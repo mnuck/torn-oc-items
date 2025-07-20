@@ -14,7 +14,8 @@ func TestGetItem(t *testing.T) {
 		t.Fatalf("TORN_API_KEY environment variable not set")
 	}
 
-	client := torn.NewClient(apiKey)
+	factionApiKey := os.Getenv("TORN_FACTION_API_KEY")
+	client := torn.NewClient(apiKey, factionApiKey)
 
 	ctx := context.Background()
 	item, err := client.GetItem(ctx, "1258")

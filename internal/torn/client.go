@@ -87,7 +87,7 @@ type CrimesResponse struct {
 	Crimes []Crime `json:"crimes"`
 }
 
-type UnavailableItem struct {
+type SuppliedItem struct {
 	ItemID  int `json:"item_id"`
 	UserID  int `json:"user_id"`
 	CrimeID int `json:"crime_id"`
@@ -152,6 +152,41 @@ func (c *Client) IncrementAPICall() {
 	c.apiCallMutex.Unlock()
 }
 
+// makeAPIRequest creates and executes an HTTP GET request to the Torn API
+func (c *Client) makeAPIRequest(ctx context.Context, url string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Increment API call counter
+	c.IncrementAPICall()
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to make request: %w", err)
+	}
+
+	return resp, nil
+}
+
+// handleAPIResponse processes the HTTP response and returns the body bytes
+func (c *Client) handleAPIResponse(resp *http.Response) ([]byte, error) {
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	return body, nil
+}
+
 // GetAPICallCount returns the current API call count
 func (c *Client) GetAPICallCount() int64 {
 	c.apiCallMutex.Lock()
@@ -177,29 +212,20 @@ func (c *Client) GetItem(ctx context.Context, itemID string) (*Item, error) {
 	}
 
 	url := fmt.Sprintf("https://api.torn.com/torn/%s?selections=items&key=%s", itemID, c.apiKey)
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	resp, err := c.makeAPIRequest(ctx, url)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, err
 	}
 
-	// Increment API call counter
-	c.IncrementAPICall()
-
-	resp, err := c.client.Do(req)
+	body, err := c.handleAPIResponse(resp)
 	if err != nil {
-		return nil, fmt.Errorf("failed to make request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
+		return nil, err
 	}
 
 	var result struct {
 		Items map[string]Item `json:"items"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
@@ -229,27 +255,18 @@ func (c *Client) GetUser(ctx context.Context, userID string) (*UserInfo, error) 
 
 	url := fmt.Sprintf("https://api.torn.com/user/%s?selections=basic&key=%s", userID, c.apiKey)
 
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	resp, err := c.makeAPIRequest(ctx, url)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, err
 	}
 
-	// Increment API call counter
-	c.IncrementAPICall()
-
-	resp, err := c.client.Do(req)
+	body, err := c.handleAPIResponse(resp)
 	if err != nil {
-		return nil, fmt.Errorf("failed to make request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
+		return nil, err
 	}
 
 	var userInfo UserInfo
-	if err := json.NewDecoder(resp.Body).Decode(&userInfo); err != nil {
+	if err := json.Unmarshal(body, &userInfo); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
@@ -287,8 +304,8 @@ func (c *Client) GetFactionCrimes(ctx context.Context, category string, offset i
 	return &crimesResp, nil
 }
 
-func (c *Client) GetUnavailableItems(ctx context.Context) ([]UnavailableItem, error) {
-	log.Debug().Msg("Fetching faction crimes for unavailable items")
+func (c *Client) GetSuppliedItems(ctx context.Context) ([]SuppliedItem, error) {
+	log.Debug().Msg("Fetching faction crimes for supplied items")
 	crimesResp, err := c.GetFactionCrimes(ctx, "planning", 0)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to get planning crimes")
@@ -299,66 +316,119 @@ func (c *Client) GetUnavailableItems(ctx context.Context) ([]UnavailableItem, er
 		Int("total_crimes", len(crimesResp.Crimes)).
 		Msg("Retrieved faction crimes")
 
-	var unavailableItems []UnavailableItem
+	suppliedItems := c.processCrimesForSuppliedItems(crimesResp.Crimes)
 
-	for _, crime := range crimesResp.Crimes {
-		log.Debug().
-			Int("crime_id", crime.ID).
-			Str("crime_name", crime.Name).
-			Str("crime_status", crime.Status).
-			Int("slots", len(crime.Slots)).
-			Msg("Processing crime")
+	log.Debug().
+		Int("total_supplied_items", len(suppliedItems)).
+		Msg("Finished processing supplied items")
 
-		for slotIndex, slot := range crime.Slots {
-			log.Debug().
-				Int("crime_id", crime.ID).
-				Int("slot_index", slotIndex).
-				Str("position", slot.Position).
-				Bool("has_item_requirement", slot.ItemRequirement != nil).
-				Bool("has_user", slot.User != nil).
-				Msg("Processing slot")
+	return suppliedItems, nil
+}
 
-			if slot.ItemRequirement != nil {
-				log.Debug().
-					Int("crime_id", crime.ID).
-					Int("slot_index", slotIndex).
-					Int("item_id", slot.ItemRequirement.ID).
-					Bool("is_reusable", slot.ItemRequirement.IsReusable).
-					Bool("is_available", slot.ItemRequirement.IsAvailable).
-					Msg("Item requirement details")
-			}
+// processCrimesForSuppliedItems processes all crimes and returns supplied items
+func (c *Client) processCrimesForSuppliedItems(crimes []Crime) []SuppliedItem {
+	var suppliedItems []SuppliedItem
 
-			if slot.User != nil {
-				log.Debug().
-					Int("crime_id", crime.ID).
-					Int("slot_index", slotIndex).
-					Int("user_id", slot.User.ID).
-					Float64("progress", slot.User.Progress).
-					Msg("User details")
-			}
+	for _, crime := range crimes {
+		c.logCrimeProcessing(crime)
+		crimeSuppliedItems := c.processCrimeSlots(crime)
+		suppliedItems = append(suppliedItems, crimeSuppliedItems...)
+	}
 
-			if slot.ItemRequirement != nil && !slot.ItemRequirement.IsAvailable && slot.User != nil {
-				log.Info().
-					Int("crime_id", crime.ID).
-					Int("slot_index", slotIndex).
-					Int("item_id", slot.ItemRequirement.ID).
-					Int("user_id", slot.User.ID).
-					Msg("Found unavailable item")
+	return suppliedItems
+}
 
-				unavailableItems = append(unavailableItems, UnavailableItem{
-					ItemID:  slot.ItemRequirement.ID,
-					UserID:  slot.User.ID,
-					CrimeID: crime.ID,
-				})
-			}
+// logCrimeProcessing logs information about the crime being processed
+func (c *Client) logCrimeProcessing(crime Crime) {
+	log.Debug().
+		Int("crime_id", crime.ID).
+		Str("crime_name", crime.Name).
+		Str("crime_status", crime.Status).
+		Int("slots", len(crime.Slots)).
+		Msg("Processing crime")
+}
+
+// processCrimeSlots processes all slots in a crime and returns supplied items
+func (c *Client) processCrimeSlots(crime Crime) []SuppliedItem {
+	var suppliedItems []SuppliedItem
+
+	for slotIndex, slot := range crime.Slots {
+		c.logSlotProcessing(crime.ID, slotIndex, slot)
+
+		if suppliedItem := c.processSlotForSuppliedItem(crime.ID, slotIndex, slot); suppliedItem != nil {
+			suppliedItems = append(suppliedItems, *suppliedItem)
 		}
 	}
 
-	log.Debug().
-		Int("total_unavailable_items", len(unavailableItems)).
-		Msg("Finished processing unavailable items")
+	return suppliedItems
+}
 
-	return unavailableItems, nil
+// logSlotProcessing logs detailed information about slot processing
+func (c *Client) logSlotProcessing(crimeID, slotIndex int, slot Slot) {
+	log.Debug().
+		Int("crime_id", crimeID).
+		Int("slot_index", slotIndex).
+		Str("position", slot.Position).
+		Bool("has_item_requirement", slot.ItemRequirement != nil).
+		Bool("has_user", slot.User != nil).
+		Msg("Processing slot")
+
+	if slot.ItemRequirement != nil {
+		log.Debug().
+			Int("crime_id", crimeID).
+			Int("slot_index", slotIndex).
+			Int("item_id", slot.ItemRequirement.ID).
+			Bool("is_reusable", slot.ItemRequirement.IsReusable).
+			Bool("is_available", slot.ItemRequirement.IsAvailable).
+			Msg("Item requirement details")
+	}
+
+	if slot.User != nil {
+		log.Debug().
+			Int("crime_id", crimeID).
+			Int("slot_index", slotIndex).
+			Int("user_id", slot.User.ID).
+			Float64("progress", slot.User.Progress).
+			Msg("User details")
+	}
+}
+
+// processSlotForSuppliedItem processes a single slot and returns a supplied item if conditions are met
+func (c *Client) processSlotForSuppliedItem(crimeID, slotIndex int, slot Slot) *SuppliedItem {
+	// Early exit if there is no item requirement
+	if slot.ItemRequirement == nil {
+		return nil
+	}
+
+	// Check if item should be supplied based on reusability and availability
+	if !c.shouldSupplyItem(slot.ItemRequirement) {
+		return nil
+	}
+
+	// Must have a user to supply the item to
+	if slot.User == nil {
+		return nil
+	}
+
+	log.Info().
+		Int("crime_id", crimeID).
+		Int("slot_index", slotIndex).
+		Int("item_id", slot.ItemRequirement.ID).
+		Int("user_id", slot.User.ID).
+		Msg("Found supplied item")
+
+	return &SuppliedItem{
+		ItemID:  slot.ItemRequirement.ID,
+		UserID:  slot.User.ID,
+		CrimeID: crimeID,
+	}
+}
+
+// shouldSupplyItem determines if an item should be supplied based on its requirements
+func (c *Client) shouldSupplyItem(requirement *ItemRequirement) bool {
+	// If the item is not reusable, we will always provide it
+	// If the item is reusable, we will only provide it if it is not available
+	return !requirement.IsReusable || (requirement.IsReusable && !requirement.IsAvailable)
 }
 
 func (c *Client) GetItemSendLogs(ctx context.Context) (*LogResponse, error) {
@@ -378,38 +448,19 @@ func (c *Client) GetItemSendLogs(ctx context.Context) (*LogResponse, error) {
 		Str("to_time", time.Unix(to, 0).Format("2006-01-02 15:04:05")).
 		Msg("Querying logs for time range")
 
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	resp, err := c.makeAPIRequest(ctx, url)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, err
 	}
-
-	// Increment API call counter
-	c.IncrementAPICall()
-
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to make request: %w", err)
-	}
-	defer resp.Body.Close()
 
 	log.Debug().
 		Int("status_code", resp.StatusCode).
 		Str("content_type", resp.Header.Get("Content-Type")).
 		Msg("Received API response")
 
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		log.Debug().
-			Int("status_code", resp.StatusCode).
-			Str("response_body", string(body)).
-			Msg("Non-200 response from API")
-		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	// Read the entire response body first for debugging
-	body, err := io.ReadAll(resp.Body)
+	body, err := c.handleAPIResponse(resp)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
+		return nil, err
 	}
 
 	log.Debug().
@@ -450,27 +501,18 @@ func (c *Client) GetItemSendLogs(ctx context.Context) (*LogResponse, error) {
 func (c *Client) WhoAmI(ctx context.Context) (string, error) {
 	url := fmt.Sprintf("https://api.torn.com/user/?selections=basic&key=%s", c.apiKey)
 
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	resp, err := c.makeAPIRequest(ctx, url)
 	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
+		return "", err
 	}
 
-	// Increment API call counter
-	c.IncrementAPICall()
-
-	resp, err := c.client.Do(req)
+	body, err := c.handleAPIResponse(resp)
 	if err != nil {
-		return "", fmt.Errorf("failed to make request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
+		return "", err
 	}
 
 	var userInfo UserInfo
-	if err := json.NewDecoder(resp.Body).Decode(&userInfo); err != nil {
+	if err := json.Unmarshal(body, &userInfo); err != nil {
 		return "", fmt.Errorf("failed to decode response: %w", err)
 	}
 

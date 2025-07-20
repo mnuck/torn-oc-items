@@ -38,7 +38,7 @@ func (c *Client) AppendRows(ctx context.Context, spreadsheetID, range_ string, r
 	}
 
 	_, err := c.service.Spreadsheets.Values.Append(spreadsheetID, range_, valueRange).
-		ValueInputOption("RAW").
+		ValueInputOption("USER_ENTERED").
 		InsertDataOption("INSERT_ROWS").
 		Context(ctx).
 		Do()
@@ -55,7 +55,7 @@ func (c *Client) UpdateRange(ctx context.Context, spreadsheetID, range_ string, 
 	}
 
 	_, err := c.service.Spreadsheets.Values.Update(spreadsheetID, range_, valueRange).
-		ValueInputOption("RAW").
+		ValueInputOption("USER_ENTERED").
 		Context(ctx).
 		Do()
 	if err != nil {
