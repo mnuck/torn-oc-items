@@ -12,10 +12,12 @@ import (
 )
 
 type Client struct {
-	httpClient *http.Client
-	baseURL    string
-	topic      string
-	enabled    bool
+	httpClient   *http.Client
+	baseURL      string
+	topic        string
+	enabled      bool
+	batchMode    bool
+	priority     string
 }
 
 type ItemInfo struct {
@@ -24,14 +26,16 @@ type ItemInfo struct {
 	CrimeURL string
 }
 
-func NewClient(baseURL, topic string, enabled bool) *Client {
+func NewClient(baseURL, topic string, enabled, batchMode bool, priority string) *Client {
 	return &Client{
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
 		},
-		baseURL: baseURL,
-		topic:   topic,
-		enabled: enabled,
+		baseURL:   baseURL,
+		topic:     topic,
+		enabled:   enabled,
+		batchMode: batchMode,
+		priority:  priority,
 	}
 }
 
@@ -54,6 +58,9 @@ func (c *Client) SendNotification(ctx context.Context, message string) error {
 	}
 
 	req.Header.Set("Content-Type", "text/plain")
+	if c.priority != "" {
+		req.Header.Set("Priority", c.priority)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -95,13 +102,37 @@ func (c *Client) NotifyNewItems(ctx context.Context, items []ItemInfo, totalAdde
 		return
 	}
 
+	if c.batchMode {
+		c.sendBatchNotification(ctx, items, totalAdded)
+	} else {
+		c.sendIndividualNotifications(ctx, items)
+	}
+}
+
+func (c *Client) sendBatchNotification(ctx context.Context, items []ItemInfo, totalAdded int) {
 	message := c.formatBatchMessage(items, totalAdded)
 
 	log.Info().
 		Int("items_added", totalAdded).
-		Msg("Sending notification for new items")
+		Msg("Sending batch notification for new items")
 
 	c.SendNotificationAsync(ctx, message)
+}
+
+func (c *Client) sendIndividualNotifications(ctx context.Context, items []ItemInfo) {
+	log.Info().
+		Int("items_added", len(items)).
+		Msg("Sending individual notifications for new items")
+
+	for i, item := range items {
+		message := c.formatIndividualMessage(item, i+1, len(items))
+		c.SendNotificationAsync(ctx, message)
+		
+		// Small delay between individual notifications to avoid overwhelming
+		if i < len(items)-1 {
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
 }
 
 func (c *Client) formatBatchMessage(items []ItemInfo, totalAdded int) string {
@@ -129,5 +160,27 @@ func (c *Client) formatBatchMessage(items []ItemInfo, totalAdded int) string {
 		sb.WriteString(fmt.Sprintf("... and %d more items\n", remaining))
 	}
 
+	return strings.TrimSuffix(sb.String(), "\n")
+}
+
+func (c *Client) formatIndividualMessage(item ItemInfo, itemNum, totalItems int) string {
+	var sb strings.Builder
+	
+	// Title with item counter if multiple items
+	if totalItems > 1 {
+		sb.WriteString(fmt.Sprintf("📋 New item needed (%d/%d)\n", itemNum, totalItems))
+	} else {
+		sb.WriteString("📋 New item needed\n")
+	}
+	
+	// Item details with rich formatting
+	sb.WriteString(fmt.Sprintf("🎯 **%s**\n", item.ItemName))
+	sb.WriteString(fmt.Sprintf("👤 For: %s\n", item.UserName))
+	
+	// Add crime link if available
+	if item.CrimeURL != "" {
+		sb.WriteString(fmt.Sprintf("🔗 Crime: %s\n", item.CrimeURL))
+	}
+	
 	return strings.TrimSuffix(sb.String(), "\n")
 }

@@ -75,6 +75,8 @@ The application requires a `.env` file with:
 - `NTFY_ENABLED`: Enable/disable notifications (default: "false")
 - `NTFY_URL`: Ntfy server URL (default: "https://ntfy.sh")
 - `NTFY_TOPIC`: Notification topic name (default: "torn-oc-items")
+- `NTFY_BATCH_MODE`: Send batch notifications vs individual (default: "true")
+- `NTFY_PRIORITY`: Notification priority level - "min", "low", "default", "high", "max" (default: "default")
 
 ## Testing Strategy
 

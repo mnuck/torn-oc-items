@@ -104,17 +104,29 @@ func InitializeNotificationClient() *notifications.Client {
 	enabled := GetEnvWithDefault("NTFY_ENABLED", "false") == "true"
 	baseURL := GetEnvWithDefault("NTFY_URL", "https://ntfy.sh")
 	topic := GetEnvWithDefault("NTFY_TOPIC", "torn-oc-items")
+	batchMode := GetEnvWithDefault("NTFY_BATCH_MODE", "true") == "true"
+	priority := GetEnvWithDefault("NTFY_PRIORITY", "default")
 
 	log.Debug().
 		Bool("enabled", enabled).
 		Str("base_url", baseURL).
 		Str("topic", topic).
+		Bool("batch_mode", batchMode).
+		Str("priority", priority).
 		Msg("Initializing notification client")
 
-	client := notifications.NewClient(baseURL, topic, enabled)
+	client := notifications.NewClient(baseURL, topic, enabled, batchMode, priority)
 
 	if enabled {
-		log.Info().Str("topic", topic).Msg("Notifications enabled")
+		mode := "batch"
+		if !batchMode {
+			mode = "individual"
+		}
+		log.Info().
+			Str("topic", topic).
+			Str("mode", mode).
+			Str("priority", priority).
+			Msg("Notifications enabled")
 	} else {
 		log.Debug().Msg("Notifications disabled")
 	}
