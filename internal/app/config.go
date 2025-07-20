@@ -3,9 +3,11 @@ package app
 import (
 	"context"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
+	"torn_oc_items/internal/notifications"
 	"torn_oc_items/internal/sheets"
 	"torn_oc_items/internal/torn"
 
@@ -96,4 +98,71 @@ func InitializeClients(ctx context.Context) (*torn.Client, *sheets.Client) {
 
 	log.Debug().Msg("Clients initialized successfully")
 	return tornClient, sheetsClient
+}
+
+// InitializeNotificationClient creates and returns the notification client
+func InitializeNotificationClient() *notifications.Client {
+	enabled := GetEnvWithDefault("NTFY_ENABLED", "false") == "true"
+	baseURL := GetEnvWithDefault("NTFY_URL", "https://ntfy.sh")
+	topic := GetEnvWithDefault("NTFY_TOPIC", "torn-oc-items")
+	batchMode := GetEnvWithDefault("NTFY_BATCH_MODE", "true") == "true"
+	priority := GetEnvWithDefault("NTFY_PRIORITY", "default")
+	
+	// Parse retry configuration
+	maxRetries := parseIntWithDefault("NTFY_MAX_RETRIES", 3)
+	baseDelayMs := parseIntWithDefault("NTFY_BASE_DELAY_MS", 1000)
+	maxDelayMs := parseIntWithDefault("NTFY_MAX_DELAY_MS", 30000)
+	
+	baseDelay := time.Duration(baseDelayMs) * time.Millisecond
+	maxDelay := time.Duration(maxDelayMs) * time.Millisecond
+
+	log.Debug().
+		Bool("enabled", enabled).
+		Str("base_url", baseURL).
+		Str("topic", topic).
+		Bool("batch_mode", batchMode).
+		Str("priority", priority).
+		Int("max_retries", maxRetries).
+		Dur("base_delay", baseDelay).
+		Dur("max_delay", maxDelay).
+		Msg("Initializing notification client")
+
+	client := notifications.NewClient(baseURL, topic, enabled, batchMode, priority, maxRetries, baseDelay, maxDelay)
+
+	if enabled {
+		mode := "batch"
+		if !batchMode {
+			mode = "individual"
+		}
+		log.Info().
+			Str("topic", topic).
+			Str("mode", mode).
+			Str("priority", priority).
+			Int("max_retries", maxRetries).
+			Msg("Notifications enabled")
+	} else {
+		log.Debug().Msg("Notifications disabled")
+	}
+
+	return client
+}
+
+// parseIntWithDefault parses an environment variable as int with fallback
+func parseIntWithDefault(key string, defaultValue int) int {
+	str := os.Getenv(key)
+	if str == "" {
+		return defaultValue
+	}
+	
+	if val, err := strconv.Atoi(str); err == nil {
+		return val
+	}
+	
+	log.Warn().
+		Str("key", key).
+		Str("value", str).
+		Int("default", defaultValue).
+		Msg("Invalid integer value, using default")
+	
+	return defaultValue
 }

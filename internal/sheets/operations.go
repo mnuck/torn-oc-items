@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	"torn_oc_items/internal/notifications"
+
 	"github.com/rs/zerolog/log"
 )
 
@@ -145,12 +147,17 @@ func validateSheetItem(item SheetItem, rowNum int) bool {
 	return false
 }
 
-// UpdateSheet appends new rows to the spreadsheet
-func UpdateSheet(ctx context.Context, sheetsClient *Client, rows [][]interface{}, totalItems int) {
+// UpdateSheet appends new rows to the spreadsheet and sends notifications
+func UpdateSheet(ctx context.Context, sheetsClient *Client, rows [][]interface{}, totalItems int, notificationClient *notifications.Client) {
 	log.Debug().
 		Int("rows", len(rows)).
 		Int("total_items", totalItems).
 		Msg("Updating sheet")
+
+	if len(rows) == 0 {
+		log.Debug().Msg("No rows to add, skipping sheet update")
+		return
+	}
 
 	spreadsheetID := getRequiredEnv("SPREADSHEET_ID")
 	sheetRange := getEnvWithDefault("SPREADSHEET_RANGE", "Test Sheet!A1")
@@ -164,4 +171,44 @@ func UpdateSheet(ctx context.Context, sheetsClient *Client, rows [][]interface{}
 		Int("added", len(rows)).
 		Int("skipped", skipped).
 		Msg("Sheet update complete")
+
+	// Send notification for new items
+	if notificationClient != nil && len(rows) > 0 {
+		items := extractNotificationItems(rows)
+		notificationClient.NotifyNewItems(ctx, items, len(rows))
+	}
+}
+
+// extractNotificationItems converts sheet rows to notification items
+func extractNotificationItems(rows [][]interface{}) []notifications.ItemInfo {
+	var items []notifications.ItemInfo
+
+	for _, row := range rows {
+		if len(row) >= 6 {
+			// Row structure: [status, provider, crimeURL, datetime, itemName, userName, ...]
+			crimeURL := ""
+			itemName := ""
+			userName := ""
+
+			if row[2] != nil {
+				crimeURL = fmt.Sprintf("%v", row[2])
+			}
+			if row[4] != nil {
+				itemName = fmt.Sprintf("%v", row[4])
+			}
+			if row[5] != nil {
+				userName = fmt.Sprintf("%v", row[5])
+			}
+
+			if itemName != "" && userName != "" {
+				items = append(items, notifications.ItemInfo{
+					ItemName: itemName,
+					UserName: userName,
+					CrimeURL: crimeURL,
+				})
+			}
+		}
+	}
+
+	return items
 }
