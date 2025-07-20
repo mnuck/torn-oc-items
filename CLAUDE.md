@@ -19,10 +19,11 @@ Torn OC Items is a Go application that monitors Torn Online organized crime acti
 - **internal/torn/client.go**: Torn API client with caching, rate limiting tracking, and comprehensive API methods
 - **internal/sheets/client.go**: Google Sheets API client for reading and updating spreadsheet data
 - **internal/providers/manager.go**: Provider management system that aggregates logs from multiple Torn API keys
+- **internal/notifications/**: Push notification system using ntfy.sh for new item alerts
 
 ### Key Data Flow
 
-1. **Supplied Items**: Fetches faction crimes → identifies items needed → checks against existing sheet data → adds new entries
+1. **Supplied Items**: Fetches faction crimes → identifies items needed → checks against existing sheet data → adds new entries → sends notifications
 2. **Provided Items**: Reads sheet data → fetches provider logs → matches items to recipients → updates sheet with provider info
 
 ### Important Types
@@ -69,6 +70,11 @@ The application requires a `.env` file with:
 - `SPREADSHEET_RANGE`: Sheet range (default: "Test Sheet!A1")
 - `ENV`: Environment (development/production)
 - `LOGLEVEL`: Logging level (debug/info/warn/error)
+
+**Notifications:**
+- `NTFY_ENABLED`: Enable/disable notifications (default: "false")
+- `NTFY_URL`: Ntfy server URL (default: "https://ntfy.sh")
+- `NTFY_TOPIC`: Notification topic name (default: "torn-oc-items")
 
 ## Testing Strategy
 

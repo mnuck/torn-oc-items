@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"torn_oc_items/internal/notifications"
 	"torn_oc_items/internal/sheets"
 	"torn_oc_items/internal/torn"
 
@@ -96,4 +97,27 @@ func InitializeClients(ctx context.Context) (*torn.Client, *sheets.Client) {
 
 	log.Debug().Msg("Clients initialized successfully")
 	return tornClient, sheetsClient
+}
+
+// InitializeNotificationClient creates and returns the notification client
+func InitializeNotificationClient() *notifications.Client {
+	enabled := GetEnvWithDefault("NTFY_ENABLED", "false") == "true"
+	baseURL := GetEnvWithDefault("NTFY_URL", "https://ntfy.sh")
+	topic := GetEnvWithDefault("NTFY_TOPIC", "torn-oc-items")
+
+	log.Debug().
+		Bool("enabled", enabled).
+		Str("base_url", baseURL).
+		Str("topic", topic).
+		Msg("Initializing notification client")
+
+	client := notifications.NewClient(baseURL, topic, enabled)
+
+	if enabled {
+		log.Info().Str("topic", topic).Msg("Notifications enabled")
+	} else {
+		log.Debug().Msg("Notifications disabled")
+	}
+
+	return client
 }

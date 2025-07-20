@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"torn_oc_items/internal/app"
+	"torn_oc_items/internal/notifications"
 	"torn_oc_items/internal/processing"
 	"torn_oc_items/internal/providers"
 	"torn_oc_items/internal/sheets"
@@ -22,24 +23,25 @@ func main() {
 
 	ctx := context.Background()
 	tornClient, sheetsClient := app.InitializeClients(ctx)
+	notificationClient := app.InitializeNotificationClient()
 
 	// Load providers
 	providerList = providers.LoadProviders(ctx)
 
 	log.Info().Msg("Starting Torn OC Items monitor. Running immediately and then every minute...")
 
-	runProcessLoop(ctx, tornClient, sheetsClient)
+	runProcessLoop(ctx, tornClient, sheetsClient, notificationClient)
 
 	// Then start the ticker
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
 	for range ticker.C {
-		runProcessLoop(ctx, tornClient, sheetsClient)
+		runProcessLoop(ctx, tornClient, sheetsClient, notificationClient)
 	}
 }
 
-func runProcessLoop(ctx context.Context, tornClient *torn.Client, sheetsClient *sheets.Client) {
+func runProcessLoop(ctx context.Context, tornClient *torn.Client, sheetsClient *sheets.Client, notificationClient *notifications.Client) {
 	log.Debug().Msg("Starting process loop")
 
 	// Reset API call counter at the start
@@ -59,7 +61,7 @@ func runProcessLoop(ctx context.Context, tornClient *torn.Client, sheetsClient *
 
 		if len(rows) > 0 {
 			log.Debug().Int("rows", len(rows)).Msg("Updating sheet with new items")
-			sheets.UpdateSheet(ctx, sheetsClient, rows, len(suppliedItems))
+			sheets.UpdateSheet(ctx, sheetsClient, rows, len(suppliedItems), notificationClient)
 		} else {
 			log.Debug().Msg("No new items to add to sheet")
 		}
