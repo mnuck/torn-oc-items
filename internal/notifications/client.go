@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math"
+	"math/rand"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -18,6 +21,18 @@ type Client struct {
 	enabled      bool
 	batchMode    bool
 	priority     string
+	maxRetries   int
+	baseDelay    time.Duration
+	maxDelay     time.Duration
+	// Circuit breaker state
+	failures     int
+	lastFailure  time.Time
+	circuitOpen  bool
+	mutex        sync.RWMutex
+	// Metrics
+	totalSent     int64
+	totalFailed   int64
+	totalRetries  int64
 }
 
 type ItemInfo struct {
@@ -26,7 +41,31 @@ type ItemInfo struct {
 	CrimeURL string
 }
 
-func NewClient(baseURL, topic string, enabled, batchMode bool, priority string) *Client {
+type NotificationError struct {
+	Type       string
+	StatusCode int
+	Attempt    int
+	Underlying error
+}
+
+func (e *NotificationError) Error() string {
+	return fmt.Sprintf("notification failed [%s] attempt %d: %v", e.Type, e.Attempt, e.Underlying)
+}
+
+func (e *NotificationError) IsRetryable() bool {
+	switch e.Type {
+	case "network", "server", "timeout":
+		return true
+	case "rate_limit":
+		return true
+	case "auth", "client":
+		return false
+	default:
+		return e.StatusCode >= 500
+	}
+}
+
+func NewClient(baseURL, topic string, enabled, batchMode bool, priority string, maxRetries int, baseDelay, maxDelay time.Duration) *Client {
 	return &Client{
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
@@ -36,6 +75,9 @@ func NewClient(baseURL, topic string, enabled, batchMode bool, priority string) 
 		enabled:   enabled,
 		batchMode: batchMode,
 		priority:  priority,
+		maxRetries: maxRetries,
+		baseDelay:  baseDelay,
+		maxDelay:   maxDelay,
 	}
 }
 
@@ -45,16 +87,87 @@ func (c *Client) SendNotification(ctx context.Context, message string) error {
 		return nil
 	}
 
+	// Check circuit breaker
+	if c.isCircuitOpen() {
+		log.Warn().Msg("Circuit breaker open, skipping notification")
+		return &NotificationError{
+			Type:       "circuit_open",
+			StatusCode: 0,
+			Attempt:    0,
+			Underlying: fmt.Errorf("circuit breaker is open"),
+		}
+	}
+
+	var lastErr error
+	for attempt := 0; attempt <= c.maxRetries; attempt++ {
+		if attempt > 0 {
+			delay := c.calculateBackoff(attempt)
+			log.Debug().
+				Int("attempt", attempt).
+				Dur("delay", delay).
+				Msg("Retrying notification after delay")
+			
+			select {
+			case <-time.After(delay):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+			c.incrementRetries()
+		}
+
+		err := c.sendSingleNotification(ctx, message, attempt+1)
+		if err == nil {
+			c.recordSuccess()
+			return nil
+		}
+
+		lastErr = err
+		
+		// Check if error is retryable
+		if notifErr, ok := err.(*NotificationError); ok {
+			if !notifErr.IsRetryable() {
+				log.Warn().
+					Err(err).
+					Int("attempt", attempt+1).
+					Msg("Non-retryable error, giving up")
+				c.recordFailure()
+				return err
+			}
+		}
+
+		log.Warn().
+			Err(err).
+			Int("attempt", attempt+1).
+			Int("max_retries", c.maxRetries).
+			Msg("Notification attempt failed")
+	}
+
+	c.recordFailure()
+	return &NotificationError{
+		Type:       "max_retries_exceeded",
+		StatusCode: 0,
+		Attempt:    c.maxRetries + 1,
+		Underlying: lastErr,
+	}
+}
+
+func (c *Client) sendSingleNotification(ctx context.Context, message string, attempt int) error {
 	url := fmt.Sprintf("%s/%s", c.baseURL, c.topic)
 
 	log.Debug().
 		Str("url", url).
 		Str("message", message).
+		Int("attempt", attempt).
 		Msg("Sending notification")
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBufferString(message))
 	if err != nil {
-		return fmt.Errorf("failed to create notification request: %w", err)
+		return &NotificationError{
+			Type:       "client",
+			StatusCode: 0,
+			Attempt:    attempt,
+			Underlying: err,
+		}
 	}
 
 	req.Header.Set("Content-Type", "text/plain")
@@ -64,21 +177,28 @@ func (c *Client) SendNotification(ctx context.Context, message string) error {
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		log.Warn().Err(err).Msg("Failed to send notification")
-		return fmt.Errorf("failed to send notification: %w", err)
+		return &NotificationError{
+			Type:       "network",
+			StatusCode: 0,
+			Attempt:    attempt,
+			Underlying: err,
+		}
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		log.Warn().
-			Int("status_code", resp.StatusCode).
-			Str("status", resp.Status).
-			Msg("Notification request failed")
-		return fmt.Errorf("notification request failed with status: %s", resp.Status)
+		errType := c.categorizeHTTPError(resp.StatusCode)
+		return &NotificationError{
+			Type:       errType,
+			StatusCode: resp.StatusCode,
+			Attempt:    attempt,
+			Underlying: fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status),
+		}
 	}
 
 	log.Debug().
 		Int("status_code", resp.StatusCode).
+		Int("attempt", attempt).
 		Msg("Notification sent successfully")
 
 	return nil
@@ -183,4 +303,103 @@ func (c *Client) formatIndividualMessage(item ItemInfo, itemNum, totalItems int)
 	}
 	
 	return strings.TrimSuffix(sb.String(), "\n")
+}
+
+// Circuit breaker and retry helper methods
+
+func (c *Client) isCircuitOpen() bool {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+	
+	if !c.circuitOpen {
+		return false
+	}
+	
+	// Check if we should try to close the circuit (half-open state)
+	if time.Since(c.lastFailure) > 30*time.Second {
+		c.mutex.RUnlock()
+		c.mutex.Lock()
+		c.circuitOpen = false
+		c.failures = 0
+		c.mutex.Unlock()
+		c.mutex.RLock()
+		log.Info().Msg("Circuit breaker moving to half-open state")
+	}
+	
+	return c.circuitOpen
+}
+
+func (c *Client) recordSuccess() {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	
+	c.totalSent++
+	if c.circuitOpen {
+		c.circuitOpen = false
+		c.failures = 0
+		log.Info().Msg("Circuit breaker closed after successful notification")
+	}
+}
+
+func (c *Client) recordFailure() {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	
+	c.totalFailed++
+	c.failures++
+	c.lastFailure = time.Now()
+	
+	// Open circuit breaker after 5 consecutive failures
+	if c.failures >= 5 && !c.circuitOpen {
+		c.circuitOpen = true
+		log.Warn().
+			Int("failures", c.failures).
+			Msg("Circuit breaker opened due to consecutive failures")
+	}
+}
+
+func (c *Client) incrementRetries() {
+	c.mutex.Lock()
+	c.totalRetries++
+	c.mutex.Unlock()
+}
+
+func (c *Client) calculateBackoff(attempt int) time.Duration {
+	// Exponential backoff with jitter
+	base := float64(c.baseDelay)
+	backoff := base * math.Pow(2, float64(attempt-1))
+	
+	// Add jitter (±25%)
+	jitter := rand.Float64()*0.5 - 0.25  // -0.25 to +0.25
+	backoff = backoff * (1 + jitter)
+	
+	// Cap at maxDelay
+	maxBackoff := float64(c.maxDelay)
+	if backoff > maxBackoff {
+		backoff = maxBackoff
+	}
+	
+	return time.Duration(backoff)
+}
+
+func (c *Client) categorizeHTTPError(statusCode int) string {
+	switch {
+	case statusCode == 401 || statusCode == 403:
+		return "auth"
+	case statusCode == 429:
+		return "rate_limit"
+	case statusCode >= 400 && statusCode < 500:
+		return "client"
+	case statusCode >= 500:
+		return "server"
+	default:
+		return "unknown"
+	}
+}
+
+// GetMetrics returns current notification metrics
+func (c *Client) GetMetrics() (sent, failed, retries int64) {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+	return c.totalSent, c.totalFailed, c.totalRetries
 }
