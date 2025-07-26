@@ -151,24 +151,28 @@ func TestCalculateBackoffDelay(t *testing.T) {
 	maxDelay := 100 * time.Millisecond
 
 	tests := []struct {
-		attempt  int
-		expected time.Duration
+		attempt int
+		minDelay time.Duration
+		maxExpected time.Duration
 	}{
-		{0, 10 * time.Millisecond},    // 2^0 * 10ms = 10ms
-		{1, 20 * time.Millisecond},    // 2^1 * 10ms = 20ms
-		{2, 40 * time.Millisecond},    // 2^2 * 10ms = 40ms
-		{3, 80 * time.Millisecond},    // 2^3 * 10ms = 80ms
-		{4, 100 * time.Millisecond},   // 2^4 * 10ms = 160ms, capped at 100ms
-		{5, 100 * time.Millisecond},   // Capped at maxDelay
-		{35, 100 * time.Millisecond},  // Large attempt should not overflow, capped at maxDelay
-		{100, 100 * time.Millisecond}, // Very large attempt should not overflow
+		{0, 5 * time.Millisecond, 15 * time.Millisecond},    // 2^0 * 10ms = 10ms, with jitter 5-15ms
+		{1, 10 * time.Millisecond, 30 * time.Millisecond},   // 2^1 * 10ms = 20ms, with jitter 10-30ms
+		{2, 20 * time.Millisecond, 60 * time.Millisecond},   // 2^2 * 10ms = 40ms, with jitter 20-60ms
+		{3, 40 * time.Millisecond, 100 * time.Millisecond},  // 2^3 * 10ms = 80ms, with jitter 40-120ms, capped at 100ms
+		{4, 50 * time.Millisecond, 100 * time.Millisecond},  // 2^4 * 10ms = 160ms, capped at 100ms with jitter
+		{5, 50 * time.Millisecond, 100 * time.Millisecond},  // Capped at maxDelay
+		{35, 50 * time.Millisecond, 100 * time.Millisecond}, // Large attempt should not overflow, capped at maxDelay
+		{100, 50 * time.Millisecond, 100 * time.Millisecond}, // Very large attempt should not overflow
 	}
 
 	for _, test := range tests {
-		result := calculateBackoffDelay(test.attempt, baseDelay, maxDelay)
-		if result != test.expected {
-			t.Errorf("calculateBackoffDelay(%d, %v, %v) = %v, expected %v",
-				test.attempt, baseDelay, maxDelay, result, test.expected)
+		// Test multiple times due to randomness
+		for i := 0; i < 10; i++ {
+			result := calculateBackoffDelay(test.attempt, baseDelay, maxDelay)
+			if result < test.minDelay || result > test.maxExpected {
+				t.Errorf("calculateBackoffDelay(%d, %v, %v) = %v, expected between %v and %v",
+					test.attempt, baseDelay, maxDelay, result, test.minDelay, test.maxExpected)
+			}
 		}
 	}
 }

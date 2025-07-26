@@ -3,6 +3,7 @@ package retry
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -61,5 +62,15 @@ func calculateBackoffDelay(attempt int, baseDelay, maxDelay time.Duration) time.
 	if delay > maxDelay {
 		delay = maxDelay
 	}
+
+	// Add jitter to prevent thundering herd - random between 0.5x and 1.5x
+	jitter := 0.5 + rand.Float64()
+	delay = time.Duration(float64(delay) * jitter)
+
+	// Ensure we don't exceed maxDelay after jitter
+	if delay > maxDelay {
+		delay = maxDelay
+	}
+
 	return delay
 }
