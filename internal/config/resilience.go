@@ -9,6 +9,7 @@ import (
 type ResilienceConfig struct {
 	ProcessLoop retry.Config
 	APIRequest  retry.Config
+	SheetRead   retry.Config
 	HTTPTimeout time.Duration
 }
 
@@ -21,6 +22,11 @@ var DefaultResilienceConfig = ResilienceConfig{
 	APIRequest: retry.Config{
 		MaxRetries: 3,
 		BaseDelay:  1 * time.Second,
+		MaxDelay:   30 * time.Second,
+	},
+	SheetRead: retry.Config{
+		MaxRetries: 3,
+		BaseDelay:  2 * time.Second,
 		MaxDelay:   30 * time.Second,
 	},
 	HTTPTimeout: 10 * time.Second,
