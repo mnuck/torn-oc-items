@@ -152,22 +152,45 @@ func (c *Client) IncrementAPICall() {
 	c.apiCallMutex.Unlock()
 }
 
-// makeAPIRequest creates and executes an HTTP GET request to the Torn API
+// makeAPIRequest creates and executes an HTTP GET request to the Torn API with retry logic
 func (c *Client) makeAPIRequest(ctx context.Context, url string) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+	const maxRetries = 3
+	const baseDelay = 1 * time.Second
+	const maxDelay = 30 * time.Second
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+
+		// Increment API call counter
+		c.IncrementAPICall()
+
+		resp, err := c.client.Do(req)
+		if err != nil {
+			log.Debug().
+				Err(err).
+				Str("url", url).
+				Int("attempt", attempt+1).
+				Msg("API request failed")
+
+			if attempt < maxRetries {
+				delay := time.Duration(min(1<<attempt, int(maxDelay/baseDelay))) * baseDelay
+				log.Debug().
+					Dur("delay", delay).
+					Int("next_attempt", attempt+2).
+					Msg("Retrying API request after delay")
+				time.Sleep(delay)
+				continue
+			}
+			return nil, fmt.Errorf("failed to make request after %d attempts: %w", maxRetries+1, err)
+		}
+
+		return resp, nil
 	}
 
-	// Increment API call counter
-	c.IncrementAPICall()
-
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to make request: %w", err)
-	}
-
-	return resp, nil
+	return nil, fmt.Errorf("unexpected: exceeded retry loop")
 }
 
 // handleAPIResponse processes the HTTP response and returns the body bytes
