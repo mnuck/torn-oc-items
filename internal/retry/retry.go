@@ -17,6 +17,12 @@ type Config struct {
 func WithRetry[T any](ctx context.Context, config Config, operation func() (T, error)) (T, error) {
 	var zero T
 	for attempt := 0; attempt <= config.MaxRetries; attempt++ {
+		select {
+		case <-ctx.Done():
+			return zero, ctx.Err()
+		default:
+		}
+
 		result, err := operation()
 		if err == nil {
 			return result, nil
@@ -33,8 +39,13 @@ func WithRetry[T any](ctx context.Context, config Config, operation func() (T, e
 				Dur("delay", delay).
 				Int("next_attempt", attempt+2).
 				Msg("Retrying after delay")
-			time.Sleep(delay)
-			continue
+
+			select {
+			case <-ctx.Done():
+				return zero, ctx.Err()
+			case <-time.After(delay):
+				continue
+			}
 		}
 		return zero, fmt.Errorf("operation failed after %d attempts: %w", config.MaxRetries+1, err)
 	}
@@ -42,5 +53,13 @@ func WithRetry[T any](ctx context.Context, config Config, operation func() (T, e
 }
 
 func calculateBackoffDelay(attempt int, baseDelay, maxDelay time.Duration) time.Duration {
-	return time.Duration(min(1<<attempt, int(maxDelay/baseDelay))) * baseDelay
+	// Cap attempt at 30 to prevent overflow (2^30 is safe for int)
+	safeAttempt := min(attempt, 30)
+	multiplier := 1 << safeAttempt
+	delay := time.Duration(multiplier) * baseDelay
+
+	if delay > maxDelay {
+		delay = maxDelay
+	}
+	return delay
 }

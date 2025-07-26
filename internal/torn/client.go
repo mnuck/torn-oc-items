@@ -163,9 +163,6 @@ func (c *Client) makeAPIRequest(ctx context.Context, url string) (*http.Response
 			return nil, fmt.Errorf("failed to create request: %w", err)
 		}
 
-		// Increment API call counter
-		c.IncrementAPICall()
-
 		resp, err := c.client.Do(req)
 		if err != nil {
 			log.Debug().
@@ -174,6 +171,9 @@ func (c *Client) makeAPIRequest(ctx context.Context, url string) (*http.Response
 				Msg("API request failed")
 			return nil, fmt.Errorf("failed to make request: %w", err)
 		}
+
+		// Only increment API call counter after successful request
+		c.IncrementAPICall()
 
 		return resp, nil
 	})
