@@ -5,8 +5,10 @@ import (
 	"time"
 
 	"torn_oc_items/internal/app"
+	"torn_oc_items/internal/config"
 	"torn_oc_items/internal/processing"
 	"torn_oc_items/internal/providers"
+	"torn_oc_items/internal/retry"
 	"torn_oc_items/internal/sheets"
 	"torn_oc_items/internal/torn"
 
@@ -28,14 +30,36 @@ func main() {
 
 	log.Info().Msg("Starting Torn OC Items monitor. Running immediately and then every minute...")
 
-	runProcessLoop(ctx, tornClient, sheetsClient)
+	runProcessLoopWithRetry(ctx, tornClient, sheetsClient)
 
 	// Then start the ticker
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
 	for range ticker.C {
+		runProcessLoopWithRetry(ctx, tornClient, sheetsClient)
+	}
+}
+
+// runProcessLoopWithRetry wraps runProcessLoop with retry logic and panic recovery
+func runProcessLoopWithRetry(ctx context.Context, tornClient *torn.Client, sheetsClient *sheets.Client) {
+	_, err := retry.WithRetry(ctx, config.DefaultResilienceConfig.ProcessLoop, func() (struct{}, error) {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Error().
+					Interface("panic", r).
+					Msg("Recovered from panic in process loop")
+			}
+		}()
+
 		runProcessLoop(ctx, tornClient, sheetsClient)
+		return struct{}{}, nil
+	})
+
+	if err != nil {
+		log.Error().
+			Err(err).
+			Msg("All retry attempts exhausted, skipping this cycle")
 	}
 }
 
