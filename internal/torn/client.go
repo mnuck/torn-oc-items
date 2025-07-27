@@ -9,6 +9,9 @@ import (
 	"sync"
 	"time"
 
+	"torn_oc_items/internal/config"
+	"torn_oc_items/internal/retry"
+
 	"github.com/rs/zerolog/log"
 )
 
@@ -140,7 +143,7 @@ func NewClient(apiKey string, factionApiKey string) *Client {
 		apiKey:        apiKey,
 		factionApiKey: factionApiKey,
 		client: &http.Client{
-			Timeout: 10 * time.Second,
+			Timeout: config.DefaultResilienceConfig.APIRequest.Timeout,
 		},
 	}
 }
@@ -152,22 +155,28 @@ func (c *Client) IncrementAPICall() {
 	c.apiCallMutex.Unlock()
 }
 
-// makeAPIRequest creates and executes an HTTP GET request to the Torn API
+// makeAPIRequest creates and executes an HTTP GET request to the Torn API with retry logic
 func (c *Client) makeAPIRequest(ctx context.Context, url string) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
+	return retry.WithRetry(ctx, config.DefaultResilienceConfig.APIRequest, func(ctx context.Context) (*http.Response, error) {
+		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
 
-	// Increment API call counter
-	c.IncrementAPICall()
+		resp, err := c.client.Do(req)
+		if err != nil {
+			log.Debug().
+				Err(err).
+				Str("url", url).
+				Msg("API request failed")
+			return nil, fmt.Errorf("failed to make request: %w", err)
+		}
 
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to make request: %w", err)
-	}
+		// Only increment API call counter after successful request
+		c.IncrementAPICall()
 
-	return resp, nil
+		return resp, nil
+	})
 }
 
 // handleAPIResponse processes the HTTP response and returns the body bytes
@@ -282,22 +291,18 @@ func (c *Client) GetUser(ctx context.Context, userID string) (*UserInfo, error) 
 func (c *Client) GetFactionCrimes(ctx context.Context, category string, offset int) (*CrimesResponse, error) {
 	url := fmt.Sprintf("https://api.torn.com/v2/faction/crimes?key=%s&cat=%s&offset=%d", c.factionApiKey, category, offset)
 
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	resp, err := c.makeAPIRequest(ctx, url)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, err
 	}
 
-	// Increment API call counter
-	c.IncrementAPICall()
-
-	resp, err := c.client.Do(req)
+	body, err := c.handleAPIResponse(resp)
 	if err != nil {
-		return nil, fmt.Errorf("failed to make request: %w", err)
+		return nil, err
 	}
-	defer resp.Body.Close()
 
 	var crimesResp CrimesResponse
-	if err := json.NewDecoder(resp.Body).Decode(&crimesResp); err != nil {
+	if err := json.Unmarshal(body, &crimesResp); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 

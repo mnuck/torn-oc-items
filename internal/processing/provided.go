@@ -5,8 +5,10 @@ import (
 	"strings"
 	"time"
 
+	"torn_oc_items/internal/config"
 	"torn_oc_items/internal/providers"
 	"torn_oc_items/internal/resolution"
+	"torn_oc_items/internal/retry"
 	"torn_oc_items/internal/sheets"
 	"torn_oc_items/internal/torn"
 
@@ -18,7 +20,14 @@ func ProcessProvidedItems(ctx context.Context, tornClient *torn.Client, sheetsCl
 	log.Debug().Msg("Starting provided items processing")
 
 	// Get current sheet data first
-	existingData := sheets.ReadExistingSheetData(ctx, sheetsClient)
+	existingData, err := retry.WithRetry(ctx, config.DefaultResilienceConfig.SheetRead, func(ctx context.Context) ([][]interface{}, error) {
+		return sheets.ReadExistingSheetData(ctx, sheetsClient)
+	})
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to read existing sheet data after retries, skipping provided items processing")
+		return
+	}
+	
 	sheetItems := sheets.ParseSheetItems(existingData)
 
 	log.Debug().

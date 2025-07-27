@@ -5,8 +5,10 @@ import (
 	"time"
 
 	"torn_oc_items/internal/app"
+	"torn_oc_items/internal/config"
 	"torn_oc_items/internal/processing"
 	"torn_oc_items/internal/providers"
+	"torn_oc_items/internal/retry"
 	"torn_oc_items/internal/sheets"
 	"torn_oc_items/internal/torn"
 
@@ -28,14 +30,36 @@ func main() {
 
 	log.Info().Msg("Starting Torn OC Items monitor. Running immediately and then every minute...")
 
-	runProcessLoop(ctx, tornClient, sheetsClient)
+	runProcessLoopWithRetry(ctx, tornClient, sheetsClient)
 
 	// Then start the ticker
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
 	for range ticker.C {
+		runProcessLoopWithRetry(ctx, tornClient, sheetsClient)
+	}
+}
+
+// runProcessLoopWithRetry wraps runProcessLoop with retry logic and panic recovery
+func runProcessLoopWithRetry(ctx context.Context, tornClient *torn.Client, sheetsClient *sheets.Client) {
+	_, err := retry.WithRetry(ctx, config.DefaultResilienceConfig.ProcessLoop, func(ctx context.Context) (struct{}, error) {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Error().
+					Interface("panic", r).
+					Msg("Recovered from panic in process loop")
+			}
+		}()
+
 		runProcessLoop(ctx, tornClient, sheetsClient)
+		return struct{}{}, nil
+	})
+
+	if err != nil {
+		log.Error().
+			Err(err).
+			Msg("All retry attempts exhausted, skipping this cycle")
 	}
 }
 
@@ -51,7 +75,15 @@ func runProcessLoop(ctx context.Context, tornClient *torn.Client, sheetsClient *
 
 	if len(suppliedItems) > 0 {
 		log.Debug().Int("count", len(suppliedItems)).Msg("Processing new supplied items")
-		existingData := sheets.ReadExistingSheetData(ctx, sheetsClient)
+		
+		existingData, err := retry.WithRetry(ctx, config.DefaultResilienceConfig.SheetRead, func(ctx context.Context) ([][]interface{}, error) {
+			return sheets.ReadExistingSheetData(ctx, sheetsClient)
+		})
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to read existing sheet data after retries, skipping supplied items processing")
+			return
+		}
+		
 		existing := sheets.BuildExistingMap(existingData)
 
 		rows := processing.ProcessSuppliedItems(ctx, tornClient, suppliedItems, existing)
@@ -59,7 +91,13 @@ func runProcessLoop(ctx context.Context, tornClient *torn.Client, sheetsClient *
 
 		if len(rows) > 0 {
 			log.Debug().Int("rows", len(rows)).Msg("Updating sheet with new items")
-			sheets.UpdateSheet(ctx, sheetsClient, rows, len(suppliedItems))
+			_, err := retry.WithRetry(ctx, config.DefaultResilienceConfig.SheetRead, func(ctx context.Context) (struct{}, error) {
+				return struct{}{}, sheets.UpdateSheet(ctx, sheetsClient, rows, len(suppliedItems))
+			})
+			if err != nil {
+				log.Error().Err(err).Msg("Failed to update sheet after retries")
+				return
+			}
 		} else {
 			log.Debug().Msg("No new items to add to sheet")
 		}
