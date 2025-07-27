@@ -21,7 +21,7 @@ type SheetItem struct {
 }
 
 // ReadExistingSheetData reads all existing data from the spreadsheet
-func ReadExistingSheetData(ctx context.Context, sheetsClient *Client) [][]interface{} {
+func ReadExistingSheetData(ctx context.Context, sheetsClient *Client) ([][]interface{}, error) {
 	log.Debug().Msg("Reading existing sheet data")
 	spreadsheetID := getRequiredEnv("SPREADSHEET_ID")
 	sheetRange := getEnvWithDefault("SPREADSHEET_RANGE", "Test Sheet!A1")
@@ -29,10 +29,10 @@ func ReadExistingSheetData(ctx context.Context, sheetsClient *Client) [][]interf
 	readRange := strings.Split(sheetRange, "!")[0] + "!A1:Z1000"
 	existingData, err := sheetsClient.ReadSheet(ctx, spreadsheetID, readRange)
 	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to read existing sheet data")
+		return nil, fmt.Errorf("failed to read existing sheet data: %w", err)
 	}
 	log.Debug().Int("rows", len(existingData)).Msg("Retrieved existing sheet data")
-	return existingData
+	return existingData, nil
 }
 
 // BuildExistingMap creates a map of existing items for duplicate detection
@@ -148,7 +148,7 @@ func validateSheetItem(item SheetItem, rowNum int) bool {
 }
 
 // UpdateSheet appends new rows to the spreadsheet and sends notifications
-func UpdateSheet(ctx context.Context, sheetsClient *Client, rows [][]interface{}, totalItems int, notificationClient *notifications.Client) {
+func UpdateSheet(ctx context.Context, sheetsClient *Client, rows [][]interface{}, totalItems int, notificationClient *notifications.Client) error {
 	log.Debug().
 		Int("rows", len(rows)).
 		Int("total_items", totalItems).
@@ -156,14 +156,14 @@ func UpdateSheet(ctx context.Context, sheetsClient *Client, rows [][]interface{}
 
 	if len(rows) == 0 {
 		log.Debug().Msg("No rows to add, skipping sheet update")
-		return
+		return nil
 	}
 
 	spreadsheetID := getRequiredEnv("SPREADSHEET_ID")
 	sheetRange := getEnvWithDefault("SPREADSHEET_RANGE", "Test Sheet!A1")
 
 	if err := sheetsClient.AppendRows(ctx, spreadsheetID, sheetRange, rows); err != nil {
-		log.Fatal().Err(err).Msg("Failed to append rows to sheet")
+		return fmt.Errorf("failed to append rows to sheet: %w", err)
 	}
 
 	skipped := totalItems - len(rows)
@@ -177,6 +177,8 @@ func UpdateSheet(ctx context.Context, sheetsClient *Client, rows [][]interface{}
 		items := extractNotificationItems(rows)
 		notificationClient.NotifyNewItems(ctx, items, len(rows))
 	}
+	
+	return nil
 }
 
 // extractNotificationItems converts sheet rows to notification items

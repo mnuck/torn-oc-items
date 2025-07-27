@@ -15,11 +15,13 @@ Torn OC Items is a Go application that monitors Torn Online organized crime acti
 
 ### Core Components
 
-- **main.go**: Application entry point with the main processing loop and coordination logic
-- **internal/torn/client.go**: Torn API client with caching, rate limiting tracking, and comprehensive API methods
+- **main.go**: Application entry point with resilient main processing loop and coordination logic
+- **internal/torn/client.go**: Torn API client with caching, rate limiting tracking, and retry-enabled API methods
 - **internal/sheets/client.go**: Google Sheets API client for reading and updating spreadsheet data
 - **internal/providers/manager.go**: Provider management system that aggregates logs from multiple Torn API keys
 - **internal/notifications/**: Push notification system using ntfy.sh for new item alerts
+- **internal/retry/**: Reusable retry utility with exponential backoff, jitter, and context cancellation
+- **internal/config/**: Structured configuration for resilience settings and timeouts
 
 ### Key Data Flow
 
@@ -42,6 +44,7 @@ go build                    # Build the application
 ### Testing
 ```bash
 go test ./...              # Run all tests (requires API keys for integration tests)
+go test ./internal/retry   # Run retry utility tests (no external dependencies)
 go vet ./...               # Static analysis
 ```
 
@@ -90,10 +93,12 @@ The application requires a `.env` file with:
 
 ## Key Implementation Details
 
-### API Rate Limiting
-- Torn client tracks API call counts with thread-safe counters
+### API Rate Limiting & Resilience
+- Torn client tracks API call counts with thread-safe counters (only successful requests counted)
 - Caching implemented for user and item data (1-hour TTL)
 - Provider logs are fetched for 48-hour windows
+- Automatic retry with exponential backoff for failed API requests (3 attempts, 1s-30s delays)
+- Jitter applied to prevent thundering herd during outages
 
 ### Sheet Structure
 - Column A: Status ("Needed", "Provided", "Cash Sent")
@@ -104,10 +109,14 @@ The application requires a `.env` file with:
 - Column F: User name  
 - Column G: Market value with conditional formula
 
-### Error Handling
-- Robust error handling with structured logging using zerolog
-- Failed API calls are logged but don't crash the application
-- Invalid provider keys are skipped with warnings
+### Error Handling & Resilience
+- **Comprehensive retry system** with exponential backoff and jitter
+- **Main loop protection** with panic recovery and retry logic (3 attempts, 5s-60s delays)
+- **Context-aware operations** with proper timeout and cancellation handling
+- **Graceful degradation** - failed cycles are logged and skipped, application continues
+- **Structured logging** with zerolog for debugging retry attempts and failures
+- **Invalid provider keys** are skipped with warnings
+- **Overflow protection** prevents integer overflow in exponential backoff calculations
 
 ### Notification Resilience
 - **Exponential backoff retry** with jitter for failed notifications
