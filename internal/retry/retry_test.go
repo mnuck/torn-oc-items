@@ -12,10 +12,11 @@ func TestWithRetrySuccess(t *testing.T) {
 		MaxRetries: 3,
 		BaseDelay:  10 * time.Millisecond,
 		MaxDelay:   100 * time.Millisecond,
+		Timeout:    1 * time.Second,
 	}
 
 	callCount := 0
-	operation := func() (string, error) {
+	operation := func(ctx context.Context) (string, error) {
 		callCount++
 		return "success", nil
 	}
@@ -37,10 +38,11 @@ func TestWithRetrySuccessAfterRetries(t *testing.T) {
 		MaxRetries: 3,
 		BaseDelay:  10 * time.Millisecond,
 		MaxDelay:   100 * time.Millisecond,
+		Timeout:    1 * time.Second,
 	}
 
 	callCount := 0
-	operation := func() (string, error) {
+	operation := func(ctx context.Context) (string, error) {
 		callCount++
 		if callCount < 3 {
 			return "", errors.New("temporary failure")
@@ -65,10 +67,11 @@ func TestWithRetryFailureAfterMaxRetries(t *testing.T) {
 		MaxRetries: 2,
 		BaseDelay:  10 * time.Millisecond,
 		MaxDelay:   100 * time.Millisecond,
+		Timeout:    1 * time.Second,
 	}
 
 	callCount := 0
-	operation := func() (string, error) {
+	operation := func(ctx context.Context) (string, error) {
 		callCount++
 		return "", errors.New("persistent failure")
 	}
@@ -90,12 +93,13 @@ func TestWithRetryContextCancellation(t *testing.T) {
 		MaxRetries: 5,
 		BaseDelay:  50 * time.Millisecond,
 		MaxDelay:   200 * time.Millisecond,
+		Timeout:    1 * time.Second,
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 
 	callCount := 0
-	operation := func() (string, error) {
+	operation := func(ctx context.Context) (string, error) {
 		callCount++
 		if callCount == 2 {
 			cancel() // Cancel after second attempt
@@ -120,13 +124,14 @@ func TestWithRetryContextTimeout(t *testing.T) {
 		MaxRetries: 10,
 		BaseDelay:  50 * time.Millisecond,
 		MaxDelay:   200 * time.Millisecond,
+		Timeout:    1 * time.Second,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
 	callCount := 0
-	operation := func() (string, error) {
+	operation := func(ctx context.Context) (string, error) {
 		callCount++
 		return "", errors.New("failure")
 	}
@@ -182,10 +187,11 @@ func TestWithRetryDifferentTypes(t *testing.T) {
 		MaxRetries: 1,
 		BaseDelay:  10 * time.Millisecond,
 		MaxDelay:   100 * time.Millisecond,
+		Timeout:    1 * time.Second,
 	}
 
 	// Test with int
-	intResult, err := WithRetry(context.Background(), config, func() (int, error) {
+	intResult, err := WithRetry(context.Background(), config, func(ctx context.Context) (int, error) {
 		return 42, nil
 	})
 	if err != nil {
@@ -199,7 +205,7 @@ func TestWithRetryDifferentTypes(t *testing.T) {
 	type TestStruct struct {
 		Value string
 	}
-	structResult, err := WithRetry(context.Background(), config, func() (TestStruct, error) {
+	structResult, err := WithRetry(context.Background(), config, func(ctx context.Context) (TestStruct, error) {
 		return TestStruct{Value: "test"}, nil
 	})
 	if err != nil {

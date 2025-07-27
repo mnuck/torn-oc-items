@@ -143,7 +143,7 @@ func NewClient(apiKey string, factionApiKey string) *Client {
 		apiKey:        apiKey,
 		factionApiKey: factionApiKey,
 		client: &http.Client{
-			Timeout: config.DefaultResilienceConfig.HTTPTimeout,
+			Timeout: config.DefaultResilienceConfig.APIRequest.Timeout,
 		},
 	}
 }
@@ -157,7 +157,7 @@ func (c *Client) IncrementAPICall() {
 
 // makeAPIRequest creates and executes an HTTP GET request to the Torn API with retry logic
 func (c *Client) makeAPIRequest(ctx context.Context, url string) (*http.Response, error) {
-	return retry.WithRetry(ctx, config.DefaultResilienceConfig.APIRequest, func() (*http.Response, error) {
+	return retry.WithRetry(ctx, config.DefaultResilienceConfig.APIRequest, func(ctx context.Context) (*http.Response, error) {
 		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create request: %w", err)

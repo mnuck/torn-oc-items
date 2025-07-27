@@ -20,7 +20,7 @@ func ProcessProvidedItems(ctx context.Context, tornClient *torn.Client, sheetsCl
 	log.Debug().Msg("Starting provided items processing")
 
 	// Get current sheet data first
-	existingData, err := retry.WithRetry(ctx, config.DefaultResilienceConfig.SheetRead, func() ([][]interface{}, error) {
+	existingData, err := retry.WithRetry(ctx, config.DefaultResilienceConfig.SheetRead, func(ctx context.Context) ([][]interface{}, error) {
 		return sheets.ReadExistingSheetData(ctx, sheetsClient)
 	})
 	if err != nil {

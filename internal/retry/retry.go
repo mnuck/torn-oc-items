@@ -13,9 +13,10 @@ type Config struct {
 	MaxRetries int
 	BaseDelay  time.Duration
 	MaxDelay   time.Duration
+	Timeout    time.Duration
 }
 
-func WithRetry[T any](ctx context.Context, config Config, operation func() (T, error)) (T, error) {
+func WithRetry[T any](ctx context.Context, config Config, operation func(context.Context) (T, error)) (T, error) {
 	var zero T
 	for attempt := 0; attempt <= config.MaxRetries; attempt++ {
 		select {
@@ -24,7 +25,12 @@ func WithRetry[T any](ctx context.Context, config Config, operation func() (T, e
 		default:
 		}
 
-		result, err := operation()
+		// Create timeout context for this operation
+		opCtx, cancel := context.WithTimeout(ctx, config.Timeout)
+		
+		result, err := operation(opCtx)
+		cancel()
+		
 		if err == nil {
 			return result, nil
 		}

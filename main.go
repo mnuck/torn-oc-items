@@ -43,7 +43,7 @@ func main() {
 
 // runProcessLoopWithRetry wraps runProcessLoop with retry logic and panic recovery
 func runProcessLoopWithRetry(ctx context.Context, tornClient *torn.Client, sheetsClient *sheets.Client) {
-	_, err := retry.WithRetry(ctx, config.DefaultResilienceConfig.ProcessLoop, func() (struct{}, error) {
+	_, err := retry.WithRetry(ctx, config.DefaultResilienceConfig.ProcessLoop, func(ctx context.Context) (struct{}, error) {
 		defer func() {
 			if r := recover(); r != nil {
 				log.Error().
@@ -76,7 +76,7 @@ func runProcessLoop(ctx context.Context, tornClient *torn.Client, sheetsClient *
 	if len(suppliedItems) > 0 {
 		log.Debug().Int("count", len(suppliedItems)).Msg("Processing new supplied items")
 		
-		existingData, err := retry.WithRetry(ctx, config.DefaultResilienceConfig.SheetRead, func() ([][]interface{}, error) {
+		existingData, err := retry.WithRetry(ctx, config.DefaultResilienceConfig.SheetRead, func(ctx context.Context) ([][]interface{}, error) {
 			return sheets.ReadExistingSheetData(ctx, sheetsClient)
 		})
 		if err != nil {
@@ -91,7 +91,7 @@ func runProcessLoop(ctx context.Context, tornClient *torn.Client, sheetsClient *
 
 		if len(rows) > 0 {
 			log.Debug().Int("rows", len(rows)).Msg("Updating sheet with new items")
-			_, err := retry.WithRetry(ctx, config.DefaultResilienceConfig.SheetRead, func() (struct{}, error) {
+			_, err := retry.WithRetry(ctx, config.DefaultResilienceConfig.SheetRead, func(ctx context.Context) (struct{}, error) {
 				return struct{}{}, sheets.UpdateSheet(ctx, sheetsClient, rows, len(suppliedItems))
 			})
 			if err != nil {
