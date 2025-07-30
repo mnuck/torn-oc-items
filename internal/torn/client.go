@@ -143,7 +143,7 @@ func NewClient(apiKey string, factionApiKey string) *Client {
 		apiKey:        apiKey,
 		factionApiKey: factionApiKey,
 		client: &http.Client{
-			Timeout: config.DefaultResilienceConfig.APIRequest.Timeout,
+			// No timeout - let retry logic's context handle all timeouts
 		},
 	}
 }
@@ -190,7 +190,19 @@ func (c *Client) handleAPIResponse(resp *http.Response) ([]byte, error) {
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
+		log.Debug().
+			Err(err).
+			Int("status_code", resp.StatusCode).
+			Str("content_type", resp.Header.Get("Content-Type")).
+			Msg("Failed to read response body - detailed error info")
+		
+		// If we successfully got headers but failed reading body, this is likely a network issue
+		// that should be retried rather than treated as a permanent failure
+		if resp.StatusCode == 200 && err.Error() == "context canceled" {
+			return nil, fmt.Errorf("network connection interrupted during body read: %w", err)
+		}
+		
+		return nil, fmt.Errorf("failed to read response body (status: %d): %w", resp.StatusCode, err)
 	}
 
 	return body, nil
@@ -220,36 +232,38 @@ func (c *Client) GetItem(ctx context.Context, itemID string) (*Item, error) {
 		}
 	}
 
-	url := fmt.Sprintf("https://api.torn.com/torn/%s?selections=items&key=%s", itemID, c.apiKey)
-	resp, err := c.makeAPIRequest(ctx, url)
-	if err != nil {
-		return nil, err
-	}
+	return retry.WithRetry(ctx, config.DefaultResilienceConfig.APIRequest, func(ctx context.Context) (*Item, error) {
+		url := fmt.Sprintf("https://api.torn.com/torn/%s?selections=items&key=%s", itemID, c.apiKey)
+		resp, err := c.makeAPIRequest(ctx, url)
+		if err != nil {
+			return nil, err
+		}
 
-	body, err := c.handleAPIResponse(resp)
-	if err != nil {
-		return nil, err
-	}
+		body, err := c.handleAPIResponse(resp)
+		if err != nil {
+			return nil, err
+		}
 
-	var result struct {
-		Items map[string]Item `json:"items"`
-	}
-	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
-	}
+		var result struct {
+			Items map[string]Item `json:"items"`
+		}
+		if err := json.Unmarshal(body, &result); err != nil {
+			return nil, fmt.Errorf("failed to decode response: %w", err)
+		}
 
-	item, ok := result.Items[itemID]
-	if !ok {
-		return nil, fmt.Errorf("item %s not found", itemID)
-	}
+		item, ok := result.Items[itemID]
+		if !ok {
+			return nil, fmt.Errorf("item %s not found", itemID)
+		}
 
-	// Cache the result
-	c.itemCache.Store(itemID, cachedItem{
-		item:      &item,
-		timestamp: time.Now(),
+		// Cache the result
+		c.itemCache.Store(itemID, cachedItem{
+			item:      &item,
+			timestamp: time.Now(),
+		})
+
+		return &item, nil
 	})
-
-	return &item, nil
 }
 
 func (c *Client) GetUser(ctx context.Context, userID string) (*UserInfo, error) {
@@ -262,30 +276,32 @@ func (c *Client) GetUser(ctx context.Context, userID string) (*UserInfo, error) 
 		}
 	}
 
-	url := fmt.Sprintf("https://api.torn.com/user/%s?selections=basic&key=%s", userID, c.apiKey)
+	return retry.WithRetry(ctx, config.DefaultResilienceConfig.APIRequest, func(ctx context.Context) (*UserInfo, error) {
+		url := fmt.Sprintf("https://api.torn.com/user/%s?selections=basic&key=%s", userID, c.apiKey)
 
-	resp, err := c.makeAPIRequest(ctx, url)
-	if err != nil {
-		return nil, err
-	}
+		resp, err := c.makeAPIRequest(ctx, url)
+		if err != nil {
+			return nil, err
+		}
 
-	body, err := c.handleAPIResponse(resp)
-	if err != nil {
-		return nil, err
-	}
+		body, err := c.handleAPIResponse(resp)
+		if err != nil {
+			return nil, err
+		}
 
-	var userInfo UserInfo
-	if err := json.Unmarshal(body, &userInfo); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
-	}
+		var userInfo UserInfo
+		if err := json.Unmarshal(body, &userInfo); err != nil {
+			return nil, fmt.Errorf("failed to decode response: %w", err)
+		}
 
-	// Cache the result
-	c.userCache.Store(userID, cachedUser{
-		user:      &userInfo,
-		timestamp: time.Now(),
+		// Cache the result
+		c.userCache.Store(userID, cachedUser{
+			user:      &userInfo,
+			timestamp: time.Now(),
+		})
+
+		return &userInfo, nil
 	})
-
-	return &userInfo, nil
 }
 
 func (c *Client) GetFactionCrimes(ctx context.Context, category string, offset int) (*CrimesResponse, error) {
