@@ -1,0 +1,14 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: torn-oc-items-service
+  namespace: default
+  labels:
+    app: torn-oc-items
+spec:
+  # Headless service for DNS resolution (no load balancing needed)
+  clusterIP: None
+  selector:
+    app: torn-oc-items
+  # No ports defined since this is a batch application without HTTP endpoints
