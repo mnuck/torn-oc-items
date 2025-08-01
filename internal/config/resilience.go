@@ -20,10 +20,10 @@ var DefaultResilienceConfig = ResilienceConfig{
 		Timeout:    30 * time.Second,
 	},
 	APIRequest: retry.Config{
-		MaxRetries: 3,
+		MaxRetries: 5,
 		BaseDelay:  1 * time.Second,
 		MaxDelay:   30 * time.Second,
-		Timeout:    10 * time.Second,
+		Timeout:    15 * time.Second,
 	},
 	SheetRead: retry.Config{
 		MaxRetries: 3,

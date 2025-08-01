@@ -305,24 +305,26 @@ func (c *Client) GetUser(ctx context.Context, userID string) (*UserInfo, error) 
 }
 
 func (c *Client) GetFactionCrimes(ctx context.Context, category string, offset int) (*CrimesResponse, error) {
-	url := fmt.Sprintf("https://api.torn.com/v2/faction/crimes?key=%s&cat=%s&offset=%d", c.factionApiKey, category, offset)
+	return retry.WithRetry(ctx, config.DefaultResilienceConfig.APIRequest, func(ctx context.Context) (*CrimesResponse, error) {
+		url := fmt.Sprintf("https://api.torn.com/v2/faction/crimes?key=%s&cat=%s&offset=%d", c.factionApiKey, category, offset)
 
-	resp, err := c.makeAPIRequest(ctx, url)
-	if err != nil {
-		return nil, err
-	}
+		resp, err := c.makeAPIRequest(ctx, url)
+		if err != nil {
+			return nil, err
+		}
 
-	body, err := c.handleAPIResponse(resp)
-	if err != nil {
-		return nil, err
-	}
+		body, err := c.handleAPIResponse(resp)
+		if err != nil {
+			return nil, err
+		}
 
-	var crimesResp CrimesResponse
-	if err := json.Unmarshal(body, &crimesResp); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
-	}
+		var crimesResp CrimesResponse
+		if err := json.Unmarshal(body, &crimesResp); err != nil {
+			return nil, fmt.Errorf("failed to decode response: %w", err)
+		}
 
-	return &crimesResp, nil
+		return &crimesResp, nil
+	})
 }
 
 func (c *Client) GetSuppliedItems(ctx context.Context) ([]SuppliedItem, error) {
@@ -460,82 +462,86 @@ func (c *Client) GetItemSendLogs(ctx context.Context) (*LogResponse, error) {
 	from := now.Add(-48 * time.Hour).Unix()
 	to := now.Unix()
 
-	url := fmt.Sprintf("https://api.torn.com/user?selections=log&log=4102&from=%d&to=%d&key=%s", from, to, c.apiKey)
+	return retry.WithRetry(ctx, config.DefaultResilienceConfig.APIRequest, func(ctx context.Context) (*LogResponse, error) {
+		url := fmt.Sprintf("https://api.torn.com/user?selections=log&log=4102&from=%d&to=%d&key=%s", from, to, c.apiKey)
 
-	log.Debug().
-		Int64("from_timestamp", from).
-		Int64("to_timestamp", to).
-		Str("from_time", time.Unix(from, 0).Format("2006-01-02 15:04:05")).
-		Str("to_time", time.Unix(to, 0).Format("2006-01-02 15:04:05")).
-		Msg("Querying logs for time range")
-
-	resp, err := c.makeAPIRequest(ctx, url)
-	if err != nil {
-		return nil, err
-	}
-
-	log.Debug().
-		Int("status_code", resp.StatusCode).
-		Str("content_type", resp.Header.Get("Content-Type")).
-		Msg("Received API response")
-
-	body, err := c.handleAPIResponse(resp)
-	if err != nil {
-		return nil, err
-	}
-
-	log.Debug().
-		Int("body_length", len(body)).
-		Str("response_body_preview", string(body[:min(500, len(body))])).
-		Msg("Read response body")
-
-	var logResp LogResponse
-	if err := json.Unmarshal(body, &logResp); err != nil {
 		log.Debug().
-			Err(err).
-			Str("response_body", string(body)).
-			Msg("Failed to unmarshal JSON response")
-		return nil, fmt.Errorf("failed to decode response: %w", err)
-	}
+			Int64("from_timestamp", from).
+			Int64("to_timestamp", to).
+			Str("from_time", time.Unix(from, 0).Format("2006-01-02 15:04:05")).
+			Str("to_time", time.Unix(to, 0).Format("2006-01-02 15:04:05")).
+			Msg("Querying logs for time range")
 
-	log.Debug().
-		Int("log_entries_count", len(logResp.Log)).
-		Msg("Successfully parsed log response")
-
-	// Log a few sample log IDs if available
-	if len(logResp.Log) > 0 {
-		count := 0
-		for logID := range logResp.Log {
-			if count >= 3 {
-				break
-			}
-			log.Debug().
-				Str("sample_log_id", logID).
-				Msg("Sample log entry ID")
-			count++
+		resp, err := c.makeAPIRequest(ctx, url)
+		if err != nil {
+			return nil, err
 		}
-	}
 
-	return &logResp, nil
+		log.Debug().
+			Int("status_code", resp.StatusCode).
+			Str("content_type", resp.Header.Get("Content-Type")).
+			Msg("Received API response")
+
+		body, err := c.handleAPIResponse(resp)
+		if err != nil {
+			return nil, err
+		}
+
+		log.Debug().
+			Int("body_length", len(body)).
+			Str("response_body_preview", string(body[:min(500, len(body))])).
+			Msg("Read response body")
+
+		var logResp LogResponse
+		if err := json.Unmarshal(body, &logResp); err != nil {
+			log.Debug().
+				Err(err).
+				Str("response_body", string(body)).
+				Msg("Failed to unmarshal JSON response")
+			return nil, fmt.Errorf("failed to decode response: %w", err)
+		}
+
+		log.Debug().
+			Int("log_entries_count", len(logResp.Log)).
+			Msg("Successfully parsed log response")
+
+		// Log a few sample log IDs if available
+		if len(logResp.Log) > 0 {
+			count := 0
+			for logID := range logResp.Log {
+				if count >= 3 {
+					break
+				}
+				log.Debug().
+					Str("sample_log_id", logID).
+					Msg("Sample log entry ID")
+				count++
+			}
+		}
+
+		return &logResp, nil
+	})
 }
 
 func (c *Client) WhoAmI(ctx context.Context) (string, error) {
-	url := fmt.Sprintf("https://api.torn.com/user/?selections=basic&key=%s", c.apiKey)
+	return retry.WithRetry(ctx, config.DefaultResilienceConfig.APIRequest, func(ctx context.Context) (string, error) {
+		url := fmt.Sprintf("https://api.torn.com/user/?selections=basic&key=%s", c.apiKey)
 
-	resp, err := c.makeAPIRequest(ctx, url)
-	if err != nil {
-		return "", err
-	}
+		resp, err := c.makeAPIRequest(ctx, url)
+		if err != nil {
+			return "", err
+		}
 
-	body, err := c.handleAPIResponse(resp)
-	if err != nil {
-		return "", err
-	}
+		body, err := c.handleAPIResponse(resp)
+		if err != nil {
+			return "", err
+		}
 
-	var userInfo UserInfo
-	if err := json.Unmarshal(body, &userInfo); err != nil {
-		return "", fmt.Errorf("failed to decode response: %w", err)
-	}
+		var userInfo UserInfo
+		if err := json.Unmarshal(body, &userInfo); err != nil {
+			return "", fmt.Errorf("failed to decode response: %w", err)
+		}
 
-	return userInfo.Name, nil
+		return userInfo.Name, nil
+	})
 }
