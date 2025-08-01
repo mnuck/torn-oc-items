@@ -1,5 +1,5 @@
-# Build stage - Use latest 1.24.2 Alpine image
-FROM golang:1.24.2-alpine AS builder
+# Build stage - Use latest 1.24.4 Alpine image
+FROM golang:1.24.4-alpine AS builder
 
 WORKDIR /app
 
