@@ -1,0 +1,20 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: torn-oc-items-config
+  namespace: default
+  labels:
+    app: torn-oc-items
+data:
+  # Application configuration
+  ENV: "production"
+  LOGLEVEL: "warn"
+
+  # Default notification settings (can be overridden in secrets)
+  NTFY_URL: "https://ntfy.sh"
+  NTFY_BATCH_MODE: "true"
+  NTFY_PRIORITY: "default"
+  NTFY_MAX_RETRIES: "3"
+  NTFY_BASE_DELAY_MS: "1000"
+  NTFY_MAX_DELAY_MS: "30000"

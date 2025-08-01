@@ -6,6 +6,7 @@ import (
 
 	"torn_oc_items/internal/app"
 	"torn_oc_items/internal/config"
+	"torn_oc_items/internal/notifications"
 	"torn_oc_items/internal/processing"
 	"torn_oc_items/internal/providers"
 	"torn_oc_items/internal/retry"
@@ -24,25 +25,26 @@ func main() {
 
 	ctx := context.Background()
 	tornClient, sheetsClient := app.InitializeClients(ctx)
+	notificationClient := app.InitializeNotificationClient()
 
 	// Load providers
 	providerList = providers.LoadProviders(ctx)
 
 	log.Info().Msg("Starting Torn OC Items monitor. Running immediately and then every minute...")
 
-	runProcessLoopWithRetry(ctx, tornClient, sheetsClient)
+	runProcessLoopWithRetry(ctx, tornClient, sheetsClient, notificationClient)
 
 	// Then start the ticker
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
 	for range ticker.C {
-		runProcessLoopWithRetry(ctx, tornClient, sheetsClient)
+		runProcessLoopWithRetry(ctx, tornClient, sheetsClient, notificationClient)
 	}
 }
 
 // runProcessLoopWithRetry wraps runProcessLoop with retry logic and panic recovery
-func runProcessLoopWithRetry(ctx context.Context, tornClient *torn.Client, sheetsClient *sheets.Client) {
+func runProcessLoopWithRetry(ctx context.Context, tornClient *torn.Client, sheetsClient *sheets.Client, notificationClient *notifications.Client) {
 	_, err := retry.WithRetry(ctx, config.DefaultResilienceConfig.ProcessLoop, func(ctx context.Context) (struct{}, error) {
 		defer func() {
 			if r := recover(); r != nil {
@@ -52,7 +54,7 @@ func runProcessLoopWithRetry(ctx context.Context, tornClient *torn.Client, sheet
 			}
 		}()
 
-		runProcessLoop(ctx, tornClient, sheetsClient)
+		runProcessLoop(ctx, tornClient, sheetsClient, notificationClient)
 		return struct{}{}, nil
 	})
 
@@ -63,7 +65,7 @@ func runProcessLoopWithRetry(ctx context.Context, tornClient *torn.Client, sheet
 	}
 }
 
-func runProcessLoop(ctx context.Context, tornClient *torn.Client, sheetsClient *sheets.Client) {
+func runProcessLoop(ctx context.Context, tornClient *torn.Client, sheetsClient *sheets.Client, notificationClient *notifications.Client) {
 	log.Debug().Msg("Starting process loop")
 
 	// Reset API call counter at the start
@@ -92,7 +94,7 @@ func runProcessLoop(ctx context.Context, tornClient *torn.Client, sheetsClient *
 		if len(rows) > 0 {
 			log.Debug().Int("rows", len(rows)).Msg("Updating sheet with new items")
 			_, err := retry.WithRetry(ctx, config.DefaultResilienceConfig.SheetRead, func(ctx context.Context) (struct{}, error) {
-				return struct{}{}, sheets.UpdateSheet(ctx, sheetsClient, rows, len(suppliedItems))
+				return struct{}{}, sheets.UpdateSheet(ctx, sheetsClient, rows, len(suppliedItems), notificationClient)
 			})
 			if err != nil {
 				log.Error().Err(err).Msg("Failed to update sheet after retries")

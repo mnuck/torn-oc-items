@@ -1,9 +1,18 @@
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: torn-oc-items
+  namespace: default
+  labels:
+    app: torn-oc-items
 spec:
   replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app: torn-oc-items
@@ -12,51 +21,70 @@ spec:
       labels:
         app: torn-oc-items
     spec:
+      containers:
+        - name: torn-oc-items
+          image: ghcr.io/mnuck/torn-oc-items:latest
+          imagePullPolicy: Always
+
+          # Resource limits based on Go application profile
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "100m"
+            limits:
+              memory: "128Mi"
+              cpu: "200m"
+
+          # Environment variables from ConfigMap
+          envFrom:
+            - configMapRef:
+                name: torn-oc-items-config
+
+          # Mount config files from secrets
+          volumeMounts:
+            - name: env-file
+              mountPath: /.env
+              subPath: .env
+              readOnly: true
+            - name: credentials-file
+              mountPath: /credentials.json
+              subPath: credentials.json
+              readOnly: true
+
+          # Security context
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+
+      volumes:
+        - name: env-file
+          secret:
+            secretName: torn-oc-secrets
+            items:
+              - key: .env
+                path: .env
+        - name: credentials-file
+          secret:
+            secretName: torn-oc-secrets
+            items:
+              - key: credentials.json
+                path: credentials.json
+
+      # Image pull secrets for private registry
+      imagePullSecrets:
+        - name: ghcr-cred
+
+      # Security context for pod
       securityContext:
         fsGroup: 1001
-      containers:
-      - name: torn-oc-items
-        image: localhost:32000/torn-oc-items:0.0.2
-        env:
-        - name: LOGLEVEL
-          value: "warn"
-        - name: ENV
-          value: "production"
-        securityContext:
-          allowPrivilegeEscalation: false
-          runAsNonRoot: true
-          runAsUser: 1001
-          capabilities:
-            drop:
-            - ALL
-          seccompProfile:
-            type: RuntimeDefault
-        resources:
-          requests:
-            cpu: "50m"
-            memory: "50Mi"
-          limits:
-            cpu: "100m"
-            memory: "100Mi"
-        volumeMounts:
-        - name: env-file
-          mountPath: /.env
-          subPath: .env
-          readOnly: true
-        - name: credentials-file
-          mountPath: /credentials.json
-          subPath: credentials.json
-          readOnly: true
-      volumes:
-      - name: env-file
-        secret:
-          secretName: torn-oc-secrets
-          items:
-          - key: .env
-            path: .env
-      - name: credentials-file
-        secret:
-          secretName: torn-oc-secrets
-          items:
-          - key: credentials.json
-            path: credentials.json
+
+      # Restart policy
+      restartPolicy: Always

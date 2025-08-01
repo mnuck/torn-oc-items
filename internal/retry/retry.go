@@ -21,6 +21,7 @@ func WithRetry[T any](ctx context.Context, config Config, operation func(context
 	for attempt := 0; attempt <= config.MaxRetries; attempt++ {
 		select {
 		case <-ctx.Done():
+			log.Debug().Err(ctx.Err()).Msg("Parent context canceled, aborting retry")
 			return zero, ctx.Err()
 		default:
 		}
@@ -38,6 +39,7 @@ func WithRetry[T any](ctx context.Context, config Config, operation func(context
 		log.Debug().
 			Err(err).
 			Int("attempt", attempt+1).
+			Int("max_retries", config.MaxRetries).
 			Msg("Operation failed")
 
 		if attempt < config.MaxRetries {
