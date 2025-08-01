@@ -10,15 +10,18 @@ import (
 )
 
 type Config struct {
-	MaxRetries int
-	BaseDelay  time.Duration
-	MaxDelay   time.Duration
-	Timeout    time.Duration
+	MaxRetries    int
+	BaseDelay     time.Duration
+	MaxDelay      time.Duration
+	Timeout       time.Duration
+	InfiniteRetry bool
 }
 
 func WithRetry[T any](ctx context.Context, config Config, operation func(context.Context) (T, error)) (T, error) {
 	var zero T
-	for attempt := 0; attempt <= config.MaxRetries; attempt++ {
+	attempt := 0
+	
+	for {
 		select {
 		case <-ctx.Done():
 			log.Debug().Err(ctx.Err()).Msg("Parent context canceled, aborting retry")
@@ -36,29 +39,45 @@ func WithRetry[T any](ctx context.Context, config Config, operation func(context
 			return result, nil
 		}
 
-		log.Debug().
-			Err(err).
-			Int("attempt", attempt+1).
-			Int("max_retries", config.MaxRetries).
-			Msg("Operation failed")
+		if config.InfiniteRetry {
+			log.Debug().
+				Err(err).
+				Int("attempt", attempt+1).
+				Msg("Operation failed - infinite retry enabled")
+		} else {
+			log.Debug().
+				Err(err).
+				Int("attempt", attempt+1).
+				Int("max_retries", config.MaxRetries).
+				Msg("Operation failed")
+		}
 
-		if attempt < config.MaxRetries {
-			delay := calculateBackoffDelay(attempt, config.BaseDelay, config.MaxDelay)
+		// Check if we should continue retrying
+		if !config.InfiniteRetry && attempt >= config.MaxRetries {
+			return zero, fmt.Errorf("operation failed after %d attempts: %w", config.MaxRetries+1, err)
+		}
+
+		delay := calculateBackoffDelay(attempt, config.BaseDelay, config.MaxDelay)
+		if config.InfiniteRetry {
+			log.Debug().
+				Dur("delay", delay).
+				Int("next_attempt", attempt+2).
+				Msg("Retrying after delay (infinite retry mode)")
+		} else {
 			log.Debug().
 				Dur("delay", delay).
 				Int("next_attempt", attempt+2).
 				Msg("Retrying after delay")
-
-			select {
-			case <-ctx.Done():
-				return zero, ctx.Err()
-			case <-time.After(delay):
-				continue
-			}
 		}
-		return zero, fmt.Errorf("operation failed after %d attempts: %w", config.MaxRetries+1, err)
+
+		select {
+		case <-ctx.Done():
+			return zero, ctx.Err()
+		case <-time.After(delay):
+			attempt++
+			continue
+		}
 	}
-	return zero, fmt.Errorf("unexpected: exceeded retry loop")
 }
 
 func calculateBackoffDelay(attempt int, baseDelay, maxDelay time.Duration) time.Duration {

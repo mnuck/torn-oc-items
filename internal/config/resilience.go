@@ -32,3 +32,27 @@ var DefaultResilienceConfig = ResilienceConfig{
 		Timeout:    15 * time.Second,
 	},
 }
+
+var InfiniteResilienceConfig = ResilienceConfig{
+	ProcessLoop: retry.Config{
+		MaxRetries:    0,
+		BaseDelay:     5 * time.Second,
+		MaxDelay:      60 * time.Second,
+		Timeout:       30 * time.Second,
+		InfiniteRetry: true,
+	},
+	APIRequest: retry.Config{
+		MaxRetries:    0,
+		BaseDelay:     1 * time.Second,
+		MaxDelay:      30 * time.Second,
+		Timeout:       15 * time.Second,
+		InfiniteRetry: true,
+	},
+	SheetRead: retry.Config{
+		MaxRetries:    0,
+		BaseDelay:     2 * time.Second,
+		MaxDelay:      30 * time.Second,
+		Timeout:       15 * time.Second,
+		InfiniteRetry: true,
+	},
+}

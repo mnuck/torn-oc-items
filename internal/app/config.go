@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -74,6 +75,15 @@ func GetRequiredEnv(key string) string {
 	return value
 }
 
+// GetRequiredEnvWithError fetches a required environment variable or returns an error.
+func GetRequiredEnvWithError(key string) (string, error) {
+	value := os.Getenv(key)
+	if value == "" {
+		return "", fmt.Errorf("%s environment variable is required", key)
+	}
+	return value, nil
+}
+
 // GetEnvWithDefault fetches an environment variable with a default fallback.
 func GetEnvWithDefault(key, defaultValue string) string {
 	value := os.Getenv(key)
@@ -98,6 +108,31 @@ func InitializeClients(ctx context.Context) (*torn.Client, *sheets.Client) {
 
 	log.Debug().Msg("Clients initialized successfully")
 	return tornClient, sheetsClient
+}
+
+// InitializeClientsWithRetry creates and returns the Torn API client and Google Sheets client with error handling for infinite retry
+func InitializeClientsWithRetry(ctx context.Context) (*torn.Client, *sheets.Client, error) {
+	log.Debug().Msg("Initializing clients")
+	apiKey, err := GetRequiredEnvWithError("TORN_API_KEY")
+	if err != nil {
+		return nil, nil, err
+	}
+	
+	factionApiKey, err := GetRequiredEnvWithError("TORN_FACTION_API_KEY")
+	if err != nil {
+		return nil, nil, err
+	}
+	
+	credsFile := "credentials.json"
+
+	tornClient := torn.NewClient(apiKey, factionApiKey)
+	sheetsClient, err := sheets.NewClient(ctx, credsFile)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create sheets client: %w", err)
+	}
+
+	log.Debug().Msg("Clients initialized successfully")
+	return tornClient, sheetsClient, nil
 }
 
 // InitializeNotificationClient creates and returns the notification client
