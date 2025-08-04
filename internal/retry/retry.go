@@ -28,10 +28,10 @@ func WithRetry[T any](ctx context.Context, config Config, operation func(context
 
 		// Create timeout context for this operation
 		opCtx, cancel := context.WithTimeout(ctx, config.Timeout)
-		
+
 		result, err := operation(opCtx)
 		cancel()
-		
+
 		if err == nil {
 			return result, nil
 		}

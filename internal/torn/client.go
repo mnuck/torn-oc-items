@@ -142,7 +142,7 @@ func NewClient(apiKey string, factionApiKey string) *Client {
 	return &Client{
 		apiKey:        apiKey,
 		factionApiKey: factionApiKey,
-		client: &http.Client{
+		client:        &http.Client{
 			// No timeout - let retry logic's context handle all timeouts
 		},
 	}
@@ -195,13 +195,13 @@ func (c *Client) handleAPIResponse(resp *http.Response) ([]byte, error) {
 			Int("status_code", resp.StatusCode).
 			Str("content_type", resp.Header.Get("Content-Type")).
 			Msg("Failed to read response body - detailed error info")
-		
+
 		// If we successfully got headers but failed reading body, this is likely a network issue
 		// that should be retried rather than treated as a permanent failure
 		if resp.StatusCode == 200 && err.Error() == "context canceled" {
 			return nil, fmt.Errorf("network connection interrupted during body read: %w", err)
 		}
-		
+
 		return nil, fmt.Errorf("failed to read response body (status: %d): %w", resp.StatusCode, err)
 	}
 
@@ -346,6 +346,16 @@ func (c *Client) GetSuppliedItems(ctx context.Context) ([]SuppliedItem, error) {
 		Msg("Finished processing supplied items")
 
 	return suppliedItems, nil
+}
+
+func (c *Client) GetCompletedCrimes(ctx context.Context) (*CrimesResponse, error) {
+	log.Debug().Msg("Fetching completed faction crimes")
+	return c.GetFactionCrimes(ctx, "completed", 0)
+}
+
+func (c *Client) GetPlanningCrimes(ctx context.Context) (*CrimesResponse, error) {
+	log.Debug().Msg("Fetching planning faction crimes")
+	return c.GetFactionCrimes(ctx, "planning", 0)
 }
 
 // processCrimesForSuppliedItems processes all crimes and returns supplied items
