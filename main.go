@@ -12,12 +12,14 @@ import (
 	"torn_oc_items/internal/retry"
 	"torn_oc_items/internal/sheets"
 	"torn_oc_items/internal/torn"
+	"torn_oc_items/internal/tracking"
 
 	"github.com/rs/zerolog/log"
 )
 
 // global provider list
 var providerList []providers.Provider
+var stateTracker *tracking.StateTracker
 
 func main() {
 	log.Debug().Msg("Starting application")
@@ -26,6 +28,9 @@ func main() {
 	ctx := context.Background()
 	tornClient, sheetsClient := app.InitializeClients(ctx)
 	notificationClient := app.InitializeNotificationClient()
+
+	// Initialize state tracker
+	stateTracker = tracking.NewStateTracker()
 
 	// Load providers
 	providerList = providers.LoadProviders(ctx)
@@ -77,7 +82,7 @@ func runProcessLoop(ctx context.Context, tornClient *torn.Client, sheetsClient *
 
 	if len(suppliedItems) > 0 {
 		log.Debug().Int("count", len(suppliedItems)).Msg("Processing new supplied items")
-		
+
 		existingData, err := retry.WithRetry(ctx, config.DefaultResilienceConfig.SheetRead, func(ctx context.Context) ([][]interface{}, error) {
 			return sheets.ReadExistingSheetData(ctx, sheetsClient)
 		})
@@ -85,7 +90,7 @@ func runProcessLoop(ctx context.Context, tornClient *torn.Client, sheetsClient *
 			log.Error().Err(err).Msg("Failed to read existing sheet data after retries, skipping supplied items processing")
 			return
 		}
-		
+
 		existing := sheets.BuildExistingMap(existingData)
 
 		rows := processing.ProcessSuppliedItems(ctx, tornClient, suppliedItems, existing)
@@ -117,10 +122,71 @@ func runProcessLoop(ctx context.Context, tornClient *torn.Client, sheetsClient *
 	processing.ProcessProvidedItems(ctx, tornClient, sheetsClient, providerList)
 	apiCallsAfterProvided := tornClient.GetAPICallCount()
 
+	// Track state transitions
+	log.Debug().Msg("Starting state transition tracking")
+	apiCallsBeforeTracking := tornClient.GetAPICallCount()
+	processStateTransitions(ctx, tornClient, notificationClient)
+	apiCallsAfterTracking := tornClient.GetAPICallCount()
+
 	totalAPICalls := tornClient.GetAPICallCount()
 	log.Debug().
 		Int64("api_calls_get_supplied", apiCallsAfterSupplied).
 		Int64("api_calls_process_provided", apiCallsAfterProvided-apiCallsBeforeProvided).
+		Int64("api_calls_state_tracking", apiCallsAfterTracking-apiCallsBeforeTracking).
 		Int64("total_api_calls_this_loop", totalAPICalls).
 		Msg("API call summary for runProcessLoop()")
+}
+
+func processStateTransitions(ctx context.Context, tornClient *torn.Client, notificationClient *notifications.Client) {
+	// Get both planning and completed crimes to track transitions with retry
+	planningCrimes, err := retry.WithRetry(ctx, config.DefaultResilienceConfig.StateTracking, func(ctx context.Context) (*torn.CrimesResponse, error) {
+		return tornClient.GetPlanningCrimes(ctx)
+	})
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to get planning crimes for state tracking after retries")
+		return
+	}
+
+	completedCrimes, err := retry.WithRetry(ctx, config.DefaultResilienceConfig.StateTracking, func(ctx context.Context) (*torn.CrimesResponse, error) {
+		return tornClient.GetCompletedCrimes(ctx)
+	})
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to get completed crimes for state tracking after retries")
+		return
+	}
+
+	// Track all crimes we see
+	var transitions []*tracking.StateTransition
+
+	// Process planning crimes
+	for _, crime := range planningCrimes.Crimes {
+		if transition := stateTracker.UpdateCrimeState(crime.ID, crime.Name, "planning"); transition != nil {
+			transitions = append(transitions, transition)
+		}
+	}
+
+	// Process completed crimes
+	for _, crime := range completedCrimes.Crimes {
+		if transition := stateTracker.UpdateCrimeState(crime.ID, crime.Name, "completed"); transition != nil {
+			transitions = append(transitions, transition)
+		}
+	}
+
+	// Handle transitions of interest
+	planningToCompleted := 0
+	for _, transition := range transitions {
+		if tracking.IsTransitionOfInterest(transition) {
+			planningToCompleted++
+			notificationClient.NotifyStateTransition(ctx, transition.CrimeID, transition.CrimeName,
+				transition.FromState, transition.ToState)
+		}
+	}
+
+	log.Debug().
+		Int("planning_crimes", len(planningCrimes.Crimes)).
+		Int("completed_crimes", len(completedCrimes.Crimes)).
+		Int("total_transitions", len(transitions)).
+		Int("planning_to_completed", planningToCompleted).
+		Int("tracked_crimes", stateTracker.GetTrackedCrimesCount()).
+		Msg("State transition processing complete")
 }

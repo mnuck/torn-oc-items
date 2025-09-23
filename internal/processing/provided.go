@@ -27,7 +27,7 @@ func ProcessProvidedItems(ctx context.Context, tornClient *torn.Client, sheetsCl
 		log.Error().Err(err).Msg("Failed to read existing sheet data after retries, skipping provided items processing")
 		return
 	}
-	
+
 	sheetItems := sheets.ParseSheetItems(existingData)
 
 	log.Debug().

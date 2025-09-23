@@ -15,24 +15,24 @@ import (
 )
 
 type Client struct {
-	httpClient   *http.Client
-	baseURL      string
-	topic        string
-	enabled      bool
-	batchMode    bool
-	priority     string
-	maxRetries   int
-	baseDelay    time.Duration
-	maxDelay     time.Duration
+	httpClient *http.Client
+	baseURL    string
+	topic      string
+	enabled    bool
+	batchMode  bool
+	priority   string
+	maxRetries int
+	baseDelay  time.Duration
+	maxDelay   time.Duration
 	// Circuit breaker state
-	failures     int
-	lastFailure  time.Time
-	circuitOpen  bool
-	mutex        sync.RWMutex
+	failures    int
+	lastFailure time.Time
+	circuitOpen bool
+	mutex       sync.RWMutex
 	// Metrics
-	totalSent     int64
-	totalFailed   int64
-	totalRetries  int64
+	totalSent    int64
+	totalFailed  int64
+	totalRetries int64
 }
 
 type ItemInfo struct {
@@ -70,11 +70,11 @@ func NewClient(baseURL, topic string, enabled, batchMode bool, priority string, 
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
 		},
-		baseURL:   baseURL,
-		topic:     topic,
-		enabled:   enabled,
-		batchMode: batchMode,
-		priority:  priority,
+		baseURL:    baseURL,
+		topic:      topic,
+		enabled:    enabled,
+		batchMode:  batchMode,
+		priority:   priority,
 		maxRetries: maxRetries,
 		baseDelay:  baseDelay,
 		maxDelay:   maxDelay,
@@ -106,7 +106,7 @@ func (c *Client) SendNotification(ctx context.Context, message string) error {
 				Int("attempt", attempt).
 				Dur("delay", delay).
 				Msg("Retrying notification after delay")
-			
+
 			select {
 			case <-time.After(delay):
 			case <-ctx.Done():
@@ -122,7 +122,7 @@ func (c *Client) SendNotification(ctx context.Context, message string) error {
 		}
 
 		lastErr = err
-		
+
 		// Check if error is retryable
 		if notifErr, ok := err.(*NotificationError); ok {
 			if !notifErr.IsRetryable() {
@@ -229,6 +229,24 @@ func (c *Client) NotifyNewItems(ctx context.Context, items []ItemInfo, totalAdde
 	}
 }
 
+func (c *Client) NotifyStateTransition(ctx context.Context, crimeID int, crimeName, fromState, toState string) {
+	log.Warn().
+		Int("crime_id", crimeID).
+		Str("crime_name", crimeName).
+		Str("from_state", fromState).
+		Str("to_state", toState).
+		Msg("Crime state transition detected")
+
+	if !c.enabled {
+		return
+	}
+
+	message := fmt.Sprintf("🔄 Crime State Transition\nCrime %d (%s) changed from %s to %s",
+		crimeID, crimeName, fromState, toState)
+
+	c.SendNotificationAsync(ctx, message)
+}
+
 func (c *Client) sendBatchNotification(ctx context.Context, items []ItemInfo, totalAdded int) {
 	message := c.formatBatchMessage(items, totalAdded)
 
@@ -247,7 +265,7 @@ func (c *Client) sendIndividualNotifications(ctx context.Context, items []ItemIn
 	for i, item := range items {
 		message := c.formatIndividualMessage(item, i+1, len(items))
 		c.SendNotificationAsync(ctx, message)
-		
+
 		// Small delay between individual notifications to avoid overwhelming
 		if i < len(items)-1 {
 			time.Sleep(100 * time.Millisecond)
@@ -285,23 +303,23 @@ func (c *Client) formatBatchMessage(items []ItemInfo, totalAdded int) string {
 
 func (c *Client) formatIndividualMessage(item ItemInfo, itemNum, totalItems int) string {
 	var sb strings.Builder
-	
+
 	// Title with item counter if multiple items
 	if totalItems > 1 {
 		sb.WriteString(fmt.Sprintf("📋 New item needed (%d/%d)\n", itemNum, totalItems))
 	} else {
 		sb.WriteString("📋 New item needed\n")
 	}
-	
+
 	// Item details with rich formatting
 	sb.WriteString(fmt.Sprintf("🎯 **%s**\n", item.ItemName))
 	sb.WriteString(fmt.Sprintf("👤 For: %s\n", item.UserName))
-	
+
 	// Add crime link if available
 	if item.CrimeURL != "" {
 		sb.WriteString(fmt.Sprintf("🔗 Crime: %s\n", item.CrimeURL))
 	}
-	
+
 	return strings.TrimSuffix(sb.String(), "\n")
 }
 
@@ -310,11 +328,11 @@ func (c *Client) formatIndividualMessage(item ItemInfo, itemNum, totalItems int)
 func (c *Client) isCircuitOpen() bool {
 	c.mutex.RLock()
 	defer c.mutex.RUnlock()
-	
+
 	if !c.circuitOpen {
 		return false
 	}
-	
+
 	// Check if we should try to close the circuit (half-open state)
 	if time.Since(c.lastFailure) > 30*time.Second {
 		c.mutex.RUnlock()
@@ -325,14 +343,14 @@ func (c *Client) isCircuitOpen() bool {
 		c.mutex.RLock()
 		log.Info().Msg("Circuit breaker moving to half-open state")
 	}
-	
+
 	return c.circuitOpen
 }
 
 func (c *Client) recordSuccess() {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	
+
 	c.totalSent++
 	if c.circuitOpen {
 		c.circuitOpen = false
@@ -344,11 +362,11 @@ func (c *Client) recordSuccess() {
 func (c *Client) recordFailure() {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	
+
 	c.totalFailed++
 	c.failures++
 	c.lastFailure = time.Now()
-	
+
 	// Open circuit breaker after 5 consecutive failures
 	if c.failures >= 5 && !c.circuitOpen {
 		c.circuitOpen = true
@@ -368,17 +386,17 @@ func (c *Client) calculateBackoff(attempt int) time.Duration {
 	// Exponential backoff with jitter
 	base := float64(c.baseDelay)
 	backoff := base * math.Pow(2, float64(attempt-1))
-	
+
 	// Add jitter (±25%)
-	jitter := rand.Float64()*0.5 - 0.25  // -0.25 to +0.25
+	jitter := rand.Float64()*0.5 - 0.25 // -0.25 to +0.25
 	backoff = backoff * (1 + jitter)
-	
+
 	// Cap at maxDelay
 	maxBackoff := float64(c.maxDelay)
 	if backoff > maxBackoff {
 		backoff = maxBackoff
 	}
-	
+
 	return time.Duration(backoff)
 }
 

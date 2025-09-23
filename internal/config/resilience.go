@@ -7,9 +7,10 @@ import (
 )
 
 type ResilienceConfig struct {
-	ProcessLoop retry.Config
-	APIRequest  retry.Config
-	SheetRead   retry.Config
+	ProcessLoop   retry.Config
+	APIRequest    retry.Config
+	SheetRead     retry.Config
+	StateTracking retry.Config
 }
 
 var DefaultResilienceConfig = ResilienceConfig{
@@ -30,5 +31,11 @@ var DefaultResilienceConfig = ResilienceConfig{
 		BaseDelay:  2 * time.Second,
 		MaxDelay:   30 * time.Second,
 		Timeout:    15 * time.Second,
+	},
+	StateTracking: retry.Config{
+		MaxRetries: 2,
+		BaseDelay:  1 * time.Second,
+		MaxDelay:   10 * time.Second,
+		Timeout:    10 * time.Second,
 	},
 }

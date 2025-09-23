@@ -177,7 +177,7 @@ func UpdateSheet(ctx context.Context, sheetsClient *Client, rows [][]interface{}
 		items := extractNotificationItems(rows)
 		notificationClient.NotifyNewItems(ctx, items, len(rows))
 	}
-	
+
 	return nil
 }
 
