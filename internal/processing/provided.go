@@ -109,7 +109,9 @@ func processLogItemForUpdates(ctx context.Context, tornClient *torn.Client, logI
 		return updates
 	}
 
-	for _, sheetItem := range sheetItems {
+	// Iterate backwards to select the latest (bottommost) matching row
+	for i := len(sheetItems) - 1; i >= 0; i-- {
+		sheetItem := sheetItems[i]
 		if !sheetItem.HasProvider &&
 			resolution.MatchesUser(sheetItem.UserName, receiverName, receiverID) &&
 			resolution.MatchesItem(sheetItem.ItemName, itemName, itemID) {
