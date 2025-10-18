@@ -18,7 +18,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.24.2'
+        go-version: '1.24.6'
         cache: true
 
     - name: Verify dependencies
@@ -71,7 +71,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.24.2'
+        go-version: '1.24.6'
 
     - name: Run Gosec Security Scanner
       uses: cosmos/gosec@master
@@ -96,7 +96,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.24.2'
+        go-version: '1.24.6'
 
     - name: Build binary
       run: CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o torn-oc-items .
