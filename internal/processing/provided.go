@@ -2,7 +2,6 @@ package processing
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	"torn_oc_items/internal/config"
@@ -36,10 +35,10 @@ func ProcessProvidedItems(ctx context.Context, tornClient *torn.Client, sheetsCl
 		Msg("Parsed sheet items")
 
 	// Get item send logs from all providers
-	logResp := providers.AggregateLogs(ctx, providerList)
+	logEntries := providers.AggregateLogs(ctx, providerList)
 
 	// Find sheet rows that need provider updates
-	updates := FindProviderUpdates(ctx, tornClient, sheetItems, logResp)
+	updates := FindProviderUpdates(ctx, tornClient, sheetItems, logEntries)
 	if len(updates) > 0 {
 		log.Debug().
 			Int("updates", len(updates)).
@@ -51,17 +50,16 @@ func ProcessProvidedItems(ctx context.Context, tornClient *torn.Client, sheetsCl
 }
 
 // FindProviderUpdates finds updates for sheet items based on provider logs
-func FindProviderUpdates(ctx context.Context, tornClient *torn.Client, sheetItems []sheets.SheetItem, logResp *torn.LogResponse) []sheets.SheetRowUpdate {
+func FindProviderUpdates(ctx context.Context, tornClient *torn.Client, sheetItems []sheets.SheetItem, logEntries []providers.ProviderLogEntry) []sheets.SheetRowUpdate {
 	var updates []sheets.SheetRowUpdate
 
 	log.Debug().
 		Int("sheet_items", len(sheetItems)).
-		Int("log_entries", len(logResp.Log)).
+		Int("log_entries", len(logEntries)).
 		Msg("Starting provider update matching")
 
-	for combinedID, logEntry := range logResp.Log {
-		providerName := extractProviderName(combinedID)
-		logEntryUpdates := processLogEntryForUpdates(ctx, tornClient, logEntry, providerName, sheetItems)
+	for _, ple := range logEntries {
+		logEntryUpdates := processLogEntryForUpdates(ctx, tornClient, ple.Entry, ple.ProviderName, sheetItems)
 		updates = append(updates, logEntryUpdates...)
 	}
 
@@ -70,15 +68,6 @@ func FindProviderUpdates(ctx context.Context, tornClient *torn.Client, sheetItem
 		Msg("Completed provider update matching")
 
 	return updates
-}
-
-// extractProviderName extracts the provider name from combinedID format: providerName|logID
-func extractProviderName(combinedID string) string {
-	parts := strings.SplitN(combinedID, "|", 2)
-	if len(parts) == 2 {
-		return parts[0]
-	}
-	return "Unknown"
 }
 
 // processLogEntryForUpdates processes a single log entry and returns any updates found

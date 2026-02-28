@@ -1,5 +1,8 @@
 # Build stage - Use latest 1.24.6 Alpine image
-FROM golang:1.24.6-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.24.6-alpine AS builder
+
+ARG TARGETOS
+ARG TARGETARCH
 
 WORKDIR /app
 
@@ -13,7 +16,7 @@ RUN go mod download && go mod verify
 COPY . .
 
 # Build the application with build info and security flags
-RUN CGO_ENABLED=0 GOOS=linux go build \
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
     -a \
     -installsuffix cgo \
     -ldflags='-w -s -extldflags "-static"' \
