@@ -128,7 +128,7 @@ type LogEntry struct {
 }
 
 type LogResponse struct {
-	Log map[string]LogEntry `json:"log"`
+	Log []LogEntry `json:"log"`
 }
 
 func min(a, b int) int {
@@ -515,17 +515,14 @@ func (c *Client) GetItemSendLogs(ctx context.Context) (*LogResponse, error) {
 			Int("log_entries_count", len(logResp.Log)).
 			Msg("Successfully parsed log response")
 
-		// Log a few sample log IDs if available
+		// Log a few sample entries if available
 		if len(logResp.Log) > 0 {
-			count := 0
-			for logID := range logResp.Log {
-				if count >= 3 {
-					break
-				}
+			count := min(3, len(logResp.Log))
+			for i := 0; i < count; i++ {
 				log.Debug().
-					Str("sample_log_id", logID).
-					Msg("Sample log entry ID")
-				count++
+					Int("log_entry_index", i).
+					Int("log_type", logResp.Log[i].Log).
+					Msg("Sample log entry")
 			}
 		}
 

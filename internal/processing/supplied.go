@@ -17,7 +17,8 @@ func GetSuppliedItems(ctx context.Context, tornClient *torn.Client) []torn.Suppl
 
 	suppliedItems, err := tornClient.GetSuppliedItems(ctx)
 	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to get supplied items")
+		log.Error().Err(err).Msg("Failed to get supplied items, skipping this cycle")
+		return nil
 	}
 
 	callsAfter := tornClient.GetAPICallCount()
