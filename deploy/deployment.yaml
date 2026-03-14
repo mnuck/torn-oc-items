@@ -4,6 +4,8 @@ kind: Deployment
 metadata:
   name: torn-oc-items
   namespace: default
+  annotations:
+    app.kubernetes.io/source-code: "git@github.com:mnuck/torn-oc-items.git"
   labels:
     app: torn-oc-items
 spec:
