@@ -3,10 +3,9 @@ package retry
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math/rand"
 	"time"
-
-	"github.com/rs/zerolog/log"
 )
 
 type Config struct {
@@ -21,7 +20,7 @@ func WithRetry[T any](ctx context.Context, config Config, operation func(context
 	for attempt := 0; attempt <= config.MaxRetries; attempt++ {
 		select {
 		case <-ctx.Done():
-			log.Debug().Err(ctx.Err()).Msg("Parent context canceled, aborting retry")
+			slog.Debug("Parent context canceled, aborting retry", "error", ctx.Err())
 			return zero, ctx.Err()
 		default:
 		}
@@ -36,18 +35,18 @@ func WithRetry[T any](ctx context.Context, config Config, operation func(context
 			return result, nil
 		}
 
-		log.Debug().
-			Err(err).
-			Int("attempt", attempt+1).
-			Int("max_retries", config.MaxRetries).
-			Msg("Operation failed")
+		slog.Debug("Operation failed",
+			"error", err,
+			"attempt", attempt+1,
+			"max_retries", config.MaxRetries,
+		)
 
 		if attempt < config.MaxRetries {
 			delay := calculateBackoffDelay(attempt, config.BaseDelay, config.MaxDelay)
-			log.Debug().
-				Dur("delay", delay).
-				Int("next_attempt", attempt+2).
-				Msg("Retrying after delay")
+			slog.Debug("Retrying after delay",
+				"delay", delay,
+				"next_attempt", attempt+2,
+			)
 
 			select {
 			case <-ctx.Done():

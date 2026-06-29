@@ -3,11 +3,10 @@ package sheets
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"torn_oc_items/internal/notifications"
-
-	"github.com/rs/zerolog/log"
 )
 
 // SheetItem represents a parsed item from the spreadsheet
@@ -22,22 +21,21 @@ type SheetItem struct {
 
 // ReadExistingSheetData reads all existing data from the spreadsheet
 func ReadExistingSheetData(ctx context.Context, sheetsClient *Client) ([][]interface{}, error) {
-	log.Debug().Msg("Reading existing sheet data")
+	slog.Debug("Reading existing sheet data")
 	spreadsheetID := getRequiredEnv("SPREADSHEET_ID")
 	sheetRange := getEnvWithDefault("SPREADSHEET_RANGE", "Test Sheet!A1")
-	// Extend range to Z1000 for reading all data
 	readRange := strings.Split(sheetRange, "!")[0] + "!A1:Z1000"
 	existingData, err := sheetsClient.ReadSheet(ctx, spreadsheetID, readRange)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read existing sheet data: %w", err)
 	}
-	log.Debug().Int("rows", len(existingData)).Msg("Retrieved existing sheet data")
+	slog.Debug("Retrieved existing sheet data", "rows", len(existingData))
 	return existingData, nil
 }
 
 // BuildExistingMap creates a map of existing items for duplicate detection
 func BuildExistingMap(existingData [][]interface{}) map[string]bool {
-	log.Debug().Msg("Building existing items map")
+	slog.Debug("Building existing items map")
 	existing := make(map[string]bool)
 	for _, row := range existingData {
 		if len(row) >= 6 {
@@ -59,41 +57,33 @@ func BuildExistingMap(existingData [][]interface{}) map[string]bool {
 			}
 		}
 	}
-	log.Debug().Int("entries", len(existing)).Msg("Built existing items map")
+	slog.Debug("Built existing items map", "entries", len(existing))
 	return existing
 }
 
 // ParseSheetItems parses raw sheet data into structured SheetItem objects
 func ParseSheetItems(existingData [][]interface{}) []SheetItem {
-	log.Debug().Int("rows", len(existingData)).Msg("Parsing sheet items")
+	slog.Debug("Parsing sheet items", "rows", len(existingData))
 	var items []SheetItem
 
 	for i, row := range existingData {
 		if !isValidSheetRow(row, i+1) {
 			continue
 		}
-
 		sheetItem := extractSheetItemFromRow(row, i+1)
 		if validateSheetItem(sheetItem, i+1) {
 			items = append(items, sheetItem)
 		}
 	}
 
-	log.Debug().
-		Int("total_rows", len(existingData)).
-		Int("parsed_items", len(items)).
-		Msg("Finished parsing sheet items")
-
+	slog.Debug("Finished parsing sheet items", "total_rows", len(existingData), "parsed_items", len(items))
 	return items
 }
 
 // isValidSheetRow checks if a row has sufficient columns
 func isValidSheetRow(row []interface{}, rowNum int) bool {
 	if len(row) < 6 {
-		log.Debug().
-			Int("row", rowNum).
-			Int("columns", len(row)).
-			Msg("Skipping row with insufficient columns")
+		slog.Debug("Skipping row with insufficient columns", "row", rowNum, "columns", len(row))
 		return false
 	}
 	return true
@@ -101,7 +91,6 @@ func isValidSheetRow(row []interface{}, rowNum int) bool {
 
 // extractSheetItemFromRow extracts all fields from a sheet row
 func extractSheetItemFromRow(row []interface{}, rowIndex int) SheetItem {
-	// Extract provider information
 	provider := ""
 	hasProvider := false
 	if len(row) > 1 && row[1] != nil {
@@ -109,7 +98,6 @@ func extractSheetItemFromRow(row []interface{}, rowIndex int) SheetItem {
 		hasProvider = provider != ""
 	}
 
-	// Extract other fields
 	crimeURL := extractStringField(row, 2)
 	itemName := extractStringField(row, 4)
 	userName := extractStringField(row, 5)
@@ -137,25 +125,21 @@ func validateSheetItem(item SheetItem, rowNum int) bool {
 	if item.CrimeURL != "" && item.ItemName != "" && item.UserName != "" {
 		return true
 	}
-
-	log.Debug().
-		Int("row", rowNum).
-		Str("crime_url", item.CrimeURL).
-		Str("item_name", item.ItemName).
-		Str("user_name", item.UserName).
-		Msg("Skipping row with missing required fields")
+	slog.Debug("Skipping row with missing required fields",
+		"row", rowNum,
+		"crime_url", item.CrimeURL,
+		"item_name", item.ItemName,
+		"user_name", item.UserName,
+	)
 	return false
 }
 
 // UpdateSheet appends new rows to the spreadsheet and sends notifications
 func UpdateSheet(ctx context.Context, sheetsClient *Client, rows [][]interface{}, totalItems int, notificationClient *notifications.Client) error {
-	log.Debug().
-		Int("rows", len(rows)).
-		Int("total_items", totalItems).
-		Msg("Updating sheet")
+	slog.Debug("Updating sheet", "rows", len(rows), "total_items", totalItems)
 
 	if len(rows) == 0 {
-		log.Debug().Msg("No rows to add, skipping sheet update")
+		slog.Debug("No rows to add, skipping sheet update")
 		return nil
 	}
 
@@ -167,12 +151,8 @@ func UpdateSheet(ctx context.Context, sheetsClient *Client, rows [][]interface{}
 	}
 
 	skipped := totalItems - len(rows)
-	log.Info().
-		Int("added", len(rows)).
-		Int("skipped", skipped).
-		Msg("Sheet update complete")
+	slog.Info("Sheet update complete", "added", len(rows), "skipped", skipped)
 
-	// Send notification for new items
 	if notificationClient != nil && len(rows) > 0 {
 		items := extractNotificationItems(rows)
 		notificationClient.NotifyNewItems(ctx, items, len(rows))
@@ -184,14 +164,11 @@ func UpdateSheet(ctx context.Context, sheetsClient *Client, rows [][]interface{}
 // extractNotificationItems converts sheet rows to notification items
 func extractNotificationItems(rows [][]interface{}) []notifications.ItemInfo {
 	var items []notifications.ItemInfo
-
 	for _, row := range rows {
 		if len(row) >= 6 {
-			// Row structure: [status, provider, crimeURL, datetime, itemName, userName, ...]
 			crimeURL := ""
 			itemName := ""
 			userName := ""
-
 			if row[2] != nil {
 				crimeURL = fmt.Sprintf("%v", row[2])
 			}
@@ -201,7 +178,6 @@ func extractNotificationItems(rows [][]interface{}) []notifications.ItemInfo {
 			if row[5] != nil {
 				userName = fmt.Sprintf("%v", row[5])
 			}
-
 			if itemName != "" && userName != "" {
 				items = append(items, notifications.ItemInfo{
 					ItemName: itemName,
@@ -211,6 +187,5 @@ func extractNotificationItems(rows [][]interface{}) []notifications.ItemInfo {
 			}
 		}
 	}
-
 	return items
 }

@@ -12,7 +12,7 @@ import (
 	"torn_oc_items/internal/config"
 	"torn_oc_items/internal/retry"
 
-	"github.com/rs/zerolog/log"
+	"log/slog"
 )
 
 type Client struct {
@@ -165,10 +165,7 @@ func (c *Client) makeAPIRequest(ctx context.Context, url string) (*http.Response
 
 		resp, err := c.client.Do(req)
 		if err != nil {
-			log.Debug().
-				Err(err).
-				Str("url", url).
-				Msg("API request failed")
+			slog.Debug("API request failed", "error", err, "url", url)
 			return nil, fmt.Errorf("failed to make request: %w", err)
 		}
 
@@ -190,11 +187,7 @@ func (c *Client) handleAPIResponse(resp *http.Response) ([]byte, error) {
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Debug().
-			Err(err).
-			Int("status_code", resp.StatusCode).
-			Str("content_type", resp.Header.Get("Content-Type")).
-			Msg("Failed to read response body - detailed error info")
+		slog.Debug("Failed to read response body - detailed error info", "error", err, "status_code", resp.StatusCode, "content_type", resp.Header.Get("Content-Type"))
 
 		// If we successfully got headers but failed reading body, this is likely a network issue
 		// that should be retried rather than treated as a permanent failure
@@ -328,33 +321,29 @@ func (c *Client) GetFactionCrimes(ctx context.Context, category string, offset i
 }
 
 func (c *Client) GetSuppliedItems(ctx context.Context) ([]SuppliedItem, error) {
-	log.Debug().Msg("Fetching faction crimes for supplied items")
+	slog.Debug("Fetching faction crimes for supplied items")
 	crimesResp, err := c.GetFactionCrimes(ctx, "planning", 0)
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to get planning crimes")
+		slog.Error("Failed to get planning crimes", "error", err)
 		return nil, fmt.Errorf("failed to get planning crimes: %w", err)
 	}
 
-	log.Debug().
-		Int("total_crimes", len(crimesResp.Crimes)).
-		Msg("Retrieved faction crimes")
+	slog.Debug("Retrieved faction crimes", "total_crimes", len(crimesResp.Crimes))
 
 	suppliedItems := c.processCrimesForSuppliedItems(crimesResp.Crimes)
 
-	log.Debug().
-		Int("total_supplied_items", len(suppliedItems)).
-		Msg("Finished processing supplied items")
+	slog.Debug("Finished processing supplied items", "total_supplied_items", len(suppliedItems))
 
 	return suppliedItems, nil
 }
 
 func (c *Client) GetCompletedCrimes(ctx context.Context) (*CrimesResponse, error) {
-	log.Debug().Msg("Fetching completed faction crimes")
+	slog.Debug("Fetching completed faction crimes")
 	return c.GetFactionCrimes(ctx, "completed", 0)
 }
 
 func (c *Client) GetPlanningCrimes(ctx context.Context) (*CrimesResponse, error) {
-	log.Debug().Msg("Fetching planning faction crimes")
+	slog.Debug("Fetching planning faction crimes")
 	return c.GetFactionCrimes(ctx, "planning", 0)
 }
 
@@ -373,12 +362,7 @@ func (c *Client) processCrimesForSuppliedItems(crimes []Crime) []SuppliedItem {
 
 // logCrimeProcessing logs information about the crime being processed
 func (c *Client) logCrimeProcessing(crime Crime) {
-	log.Debug().
-		Int("crime_id", crime.ID).
-		Str("crime_name", crime.Name).
-		Str("crime_status", crime.Status).
-		Int("slots", len(crime.Slots)).
-		Msg("Processing crime")
+	slog.Debug("Processing crime", "crime_id", crime.ID, "crime_name", crime.Name, "crime_status", crime.Status, "slots", len(crime.Slots))
 }
 
 // processCrimeSlots processes all slots in a crime and returns supplied items
@@ -398,31 +382,12 @@ func (c *Client) processCrimeSlots(crime Crime) []SuppliedItem {
 
 // logSlotProcessing logs detailed information about slot processing
 func (c *Client) logSlotProcessing(crimeID, slotIndex int, slot Slot) {
-	log.Debug().
-		Int("crime_id", crimeID).
-		Int("slot_index", slotIndex).
-		Str("position", slot.Position).
-		Bool("has_item_requirement", slot.ItemRequirement != nil).
-		Bool("has_user", slot.User != nil).
-		Msg("Processing slot")
-
+	slog.Debug("Processing slot", "crime_id", crimeID, "slot_index", slotIndex, "position", slot.Position, "has_item_requirement", slot.ItemRequirement != nil, "has_user", slot.User != nil)
 	if slot.ItemRequirement != nil {
-		log.Debug().
-			Int("crime_id", crimeID).
-			Int("slot_index", slotIndex).
-			Int("item_id", slot.ItemRequirement.ID).
-			Bool("is_reusable", slot.ItemRequirement.IsReusable).
-			Bool("is_available", slot.ItemRequirement.IsAvailable).
-			Msg("Item requirement details")
+		slog.Debug("Item requirement details", "crime_id", crimeID, "slot_index", slotIndex, "item_id", slot.ItemRequirement.ID, "is_reusable", slot.ItemRequirement.IsReusable, "is_available", slot.ItemRequirement.IsAvailable)
 	}
-
 	if slot.User != nil {
-		log.Debug().
-			Int("crime_id", crimeID).
-			Int("slot_index", slotIndex).
-			Int("user_id", slot.User.ID).
-			Float64("progress", slot.User.Progress).
-			Msg("User details")
+		slog.Debug("User details", "crime_id", crimeID, "slot_index", slotIndex, "user_id", slot.User.ID, "progress", slot.User.Progress)
 	}
 }
 
@@ -443,12 +408,7 @@ func (c *Client) processSlotForSuppliedItem(crimeID, slotIndex int, slot Slot) *
 		return nil
 	}
 
-	log.Info().
-		Int("crime_id", crimeID).
-		Int("slot_index", slotIndex).
-		Int("item_id", slot.ItemRequirement.ID).
-		Int("user_id", slot.User.ID).
-		Msg("Found supplied item")
+	slog.Info("Found supplied item", "crime_id", crimeID, "slot_index", slotIndex, "item_id", slot.ItemRequirement.ID, "user_id", slot.User.ID)
 
 	return &SuppliedItem{
 		ItemID:  slot.ItemRequirement.ID,
@@ -465,7 +425,7 @@ func (c *Client) shouldSupplyItem(requirement *ItemRequirement) bool {
 }
 
 func (c *Client) GetItemSendLogs(ctx context.Context) (*LogResponse, error) {
-	log.Debug().Msg("Making request to item send logs API")
+	slog.Debug("Making request to item send logs API")
 
 	// Calculate timestamps for last 48 hours
 	now := time.Now()
@@ -475,54 +435,35 @@ func (c *Client) GetItemSendLogs(ctx context.Context) (*LogResponse, error) {
 	return retry.WithRetry(ctx, config.DefaultResilienceConfig.APIRequest, func(ctx context.Context) (*LogResponse, error) {
 		url := fmt.Sprintf("https://api.torn.com/user?selections=log&log=4102&from=%d&to=%d&key=%s", from, to, c.apiKey)
 
-		log.Debug().
-			Int64("from_timestamp", from).
-			Int64("to_timestamp", to).
-			Str("from_time", time.Unix(from, 0).Format("2006-01-02 15:04:05")).
-			Str("to_time", time.Unix(to, 0).Format("2006-01-02 15:04:05")).
-			Msg("Querying logs for time range")
+		slog.Debug("Querying logs for time range", "from_timestamp", from, "to_timestamp", to, "from_time", time.Unix(from, 0).Format("2006-01-02 15:04:05"), "to_time", time.Unix(to, 0).Format("2006-01-02 15:04:05"))
 
 		resp, err := c.makeAPIRequest(ctx, url)
 		if err != nil {
 			return nil, err
 		}
 
-		log.Debug().
-			Int("status_code", resp.StatusCode).
-			Str("content_type", resp.Header.Get("Content-Type")).
-			Msg("Received API response")
+		slog.Debug("Received API response", "status_code", resp.StatusCode, "content_type", resp.Header.Get("Content-Type"))
 
 		body, err := c.handleAPIResponse(resp)
 		if err != nil {
 			return nil, err
 		}
 
-		log.Debug().
-			Int("body_length", len(body)).
-			Str("response_body_preview", string(body[:min(500, len(body))])).
-			Msg("Read response body")
+		slog.Debug("Read response body", "body_length", len(body), "response_body_preview", string(body[:min(500, len(body))]))
 
 		var logResp LogResponse
 		if err := json.Unmarshal(body, &logResp); err != nil {
-			log.Debug().
-				Err(err).
-				Str("response_body", string(body)).
-				Msg("Failed to unmarshal JSON response")
+			slog.Debug("Failed to unmarshal JSON response", "error", err, "response_body", string(body))
 			return nil, fmt.Errorf("failed to decode response: %w", err)
 		}
 
-		log.Debug().
-			Int("log_entries_count", len(logResp.Log)).
-			Msg("Successfully parsed log response")
+		slog.Debug("Successfully parsed log response", "log_entries_count", len(logResp.Log))
 
 		// Log a few sample entries if available
 		if len(logResp.Log) > 0 {
 			count := min(3, len(logResp.Log))
 			for i := 0; i < count; i++ {
-				log.Debug().
-					Int("log_entry_index", i).
-					Int("log_type", logResp.Log[i].Log).
-					Msg("Sample log entry")
+				slog.Debug("Sample log entry", "log_entry_index", i, "log_type", logResp.Log[i].Log)
 			}
 		}
 

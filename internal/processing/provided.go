@@ -2,6 +2,7 @@ package processing
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"torn_oc_items/internal/config"
@@ -10,42 +11,31 @@ import (
 	"torn_oc_items/internal/retry"
 	"torn_oc_items/internal/sheets"
 	"torn_oc_items/internal/torn"
-
-	"github.com/rs/zerolog/log"
 )
 
 // ProcessProvidedItems handles the complete workflow of processing provided items
 func ProcessProvidedItems(ctx context.Context, tornClient *torn.Client, sheetsClient *sheets.Client, providerList []providers.Provider) {
-	log.Debug().Msg("Starting provided items processing")
+	slog.Debug("Starting provided items processing")
 
-	// Get current sheet data first
 	existingData, err := retry.WithRetry(ctx, config.DefaultResilienceConfig.SheetRead, func(ctx context.Context) ([][]interface{}, error) {
 		return sheets.ReadExistingSheetData(ctx, sheetsClient)
 	})
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to read existing sheet data after retries, skipping provided items processing")
+		slog.Error("Failed to read existing sheet data after retries, skipping provided items processing", "error", err)
 		return
 	}
 
 	sheetItems := sheets.ParseSheetItems(existingData)
+	slog.Debug("Parsed sheet items", "total_rows", len(existingData), "parsed_items", len(sheetItems))
 
-	log.Debug().
-		Int("total_rows", len(existingData)).
-		Int("parsed_items", len(sheetItems)).
-		Msg("Parsed sheet items")
-
-	// Get item send logs from all providers
 	logEntries := providers.AggregateLogs(ctx, providerList)
 
-	// Find sheet rows that need provider updates
 	updates := FindProviderUpdates(ctx, tornClient, sheetItems, logEntries)
 	if len(updates) > 0 {
-		log.Debug().
-			Int("updates", len(updates)).
-			Msg("Updating provided item rows")
+		slog.Debug("Updating provided item rows", "updates", len(updates))
 		sheets.UpdateProvidedItemRows(ctx, sheetsClient, updates)
 	} else {
-		log.Debug().Msg("No provided items to update")
+		slog.Debug("No provided items to update")
 	}
 }
 
@@ -53,20 +43,14 @@ func ProcessProvidedItems(ctx context.Context, tornClient *torn.Client, sheetsCl
 func FindProviderUpdates(ctx context.Context, tornClient *torn.Client, sheetItems []sheets.SheetItem, logEntries []providers.ProviderLogEntry) []sheets.SheetRowUpdate {
 	var updates []sheets.SheetRowUpdate
 
-	log.Debug().
-		Int("sheet_items", len(sheetItems)).
-		Int("log_entries", len(logEntries)).
-		Msg("Starting provider update matching")
+	slog.Debug("Starting provider update matching", "sheet_items", len(sheetItems), "log_entries", len(logEntries))
 
 	for _, ple := range logEntries {
 		logEntryUpdates := processLogEntryForUpdates(ctx, tornClient, ple.Entry, ple.ProviderName, sheetItems)
 		updates = append(updates, logEntryUpdates...)
 	}
 
-	log.Debug().
-		Int("updates_found", len(updates)).
-		Msg("Completed provider update matching")
-
+	slog.Debug("Completed provider update matching", "updates_found", len(updates))
 	return updates
 }
 
@@ -98,7 +82,6 @@ func processLogItemForUpdates(ctx context.Context, tornClient *torn.Client, logI
 		return updates
 	}
 
-	// Iterate backwards to select the latest (bottommost) matching row
 	for i := len(sheetItems) - 1; i >= 0; i-- {
 		sheetItem := sheetItems[i]
 		if !sheetItem.HasProvider &&
@@ -108,14 +91,13 @@ func processLogItemForUpdates(ctx context.Context, tornClient *torn.Client, logI
 			update := createSheetRowUpdate(ctx, tornClient, sheetItem, itemID, timestamp, providerName)
 			updates = append(updates, update)
 
-			log.Info().
-				Int("row", sheetItem.RowIndex).
-				Str("item", sheetItem.ItemName).
-				Str("user", sheetItem.UserName).
-				Str("provider", providerName).
-				Float64("market_value", update.MarketValue).
-				Msg("Found provided item match")
-
+			slog.Info("Found provided item match",
+				"row", sheetItem.RowIndex,
+				"item", sheetItem.ItemName,
+				"user", sheetItem.UserName,
+				"provider", providerName,
+				"market_value", update.MarketValue,
+			)
 			break
 		}
 	}
@@ -126,8 +108,7 @@ func processLogItemForUpdates(ctx context.Context, tornClient *torn.Client, logI
 // createSheetRowUpdate creates a SheetRowUpdate with market value and formatted timestamp
 func createSheetRowUpdate(ctx context.Context, tornClient *torn.Client, sheetItem sheets.SheetItem, itemID int, timestamp int64, providerName string) sheets.SheetRowUpdate {
 	marketValue := resolution.GetItemMarketValue(ctx, tornClient, itemID)
-	timestampTime := time.Unix(timestamp, 0)
-	dateTime := timestampTime.Format("15:04:05 - 02/01/06")
+	dateTime := time.Unix(timestamp, 0).Format("15:04:05 - 02/01/06")
 
 	return sheets.SheetRowUpdate{
 		RowIndex:    sheetItem.RowIndex,

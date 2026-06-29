@@ -3,35 +3,31 @@ package processing
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"torn_oc_items/internal/resolution"
 	"torn_oc_items/internal/torn"
-
-	"github.com/rs/zerolog/log"
 )
 
 // GetSuppliedItems fetches and returns supplied items from the Torn API
 func GetSuppliedItems(ctx context.Context, tornClient *torn.Client) []torn.SuppliedItem {
-	log.Debug().Msg("Fetching supplied items")
+	slog.Debug("Fetching supplied items")
 	callsBefore := tornClient.GetAPICallCount()
 
 	suppliedItems, err := tornClient.GetSuppliedItems(ctx)
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to get supplied items, skipping this cycle")
+		slog.Error("Failed to get supplied items, skipping this cycle", "error", err)
 		return nil
 	}
 
 	callsAfter := tornClient.GetAPICallCount()
-	log.Debug().
-		Int("count", len(suppliedItems)).
-		Int64("api_calls", callsAfter-callsBefore).
-		Msg("Retrieved supplied items")
+	slog.Debug("Retrieved supplied items", "count", len(suppliedItems), "api_calls", callsAfter-callsBefore)
 	return suppliedItems
 }
 
 // ProcessSuppliedItems processes supplied items and returns rows to be added to the sheet
 func ProcessSuppliedItems(ctx context.Context, tornClient *torn.Client, suppliedItems []torn.SuppliedItem, existing map[string]bool) [][]interface{} {
-	log.Debug().Int("count", len(suppliedItems)).Msg("Processing supplied items")
+	slog.Debug("Processing supplied items", "count", len(suppliedItems))
 	callsBefore := tornClient.GetAPICallCount()
 	var rows [][]interface{}
 
@@ -41,33 +37,29 @@ func ProcessSuppliedItems(ctx context.Context, tornClient *torn.Client, supplied
 		itemName := resolution.GetItemDetails(ctx, tornClient, itm.ItemID)
 		userName := resolution.GetUserDetails(ctx, tornClient, itm.UserID)
 
-		log.Info().
-			Int("crime_id", itm.CrimeID).
-			Str("item", itemName).
-			Str("user", userName).
-			Str("crime_url", crimeURL).
-			Msg("Supplied item")
+		slog.Info("Supplied item",
+			"crime_id", itm.CrimeID,
+			"item", itemName,
+			"user", userName,
+			"crime_url", crimeURL,
+		)
 
 		key := fmt.Sprintf("%s|%s|%s", crimeURL, userName, itemName)
 		if !existing[key] {
-			log.Debug().
-				Str("key", key).
-				Msg("Adding new item to sheet")
+			slog.Debug("Adding new item to sheet", "key", key)
 			formula := "=IF(OR(INDIRECT(\"A\"&ROW())=\"Provided\",INDIRECT(\"A\"&ROW())=\"Cash Sent\"), INDIRECT(\"G\"&ROW()), 0)"
 			rows = append(rows, []interface{}{"Needed", "", crimeURL, "", itemName, userName, "", formula})
 		} else {
-			log.Debug().
-				Str("key", key).
-				Msg("Skipping duplicate entry")
+			slog.Debug("Skipping duplicate entry", "key", key)
 		}
 	}
 
 	callsAfter := tornClient.GetAPICallCount()
-	log.Debug().
-		Int("total_items", len(suppliedItems)).
-		Int("new_rows", len(rows)).
-		Int64("api_calls", callsAfter-callsBefore).
-		Msg("Finished processing supplied items")
+	slog.Debug("Finished processing supplied items",
+		"total_items", len(suppliedItems),
+		"new_rows", len(rows),
+		"api_calls", callsAfter-callsBefore,
+	)
 
 	return rows
 }

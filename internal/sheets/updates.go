@@ -3,9 +3,8 @@ package sheets
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
-
-	"github.com/rs/zerolog/log"
 )
 
 // SheetRowUpdate represents an update to be made to a sheet row
@@ -18,35 +17,31 @@ type SheetRowUpdate struct {
 
 // UpdateProvidedItemRows updates multiple rows in the sheet with provider information
 func UpdateProvidedItemRows(ctx context.Context, sheetsClient *Client, updates []SheetRowUpdate) {
-	log.Debug().
-		Int("updates", len(updates)).
-		Msg("Updating provided item rows")
+	slog.Debug("Updating provided item rows", "updates", len(updates))
 
 	spreadsheetID := getRequiredEnv("SPREADSHEET_ID")
 	sheetRange := getEnvWithDefault("SPREADSHEET_RANGE", "Test Sheet!A1")
 	sheetName := strings.Split(sheetRange, "!")[0]
 
 	for _, update := range updates {
-		log.Debug().
-			Int("row", update.RowIndex).
-			Str("provider", update.Provider).
-			Str("datetime", update.DateTime).
-			Float64("market_value", update.MarketValue).
-			Msg("Updating row")
+		slog.Debug("Updating row",
+			"row", update.RowIndex,
+			"provider", update.Provider,
+			"datetime", update.DateTime,
+			"market_value", update.MarketValue,
+		)
 
 		if updateAllSheetCells(ctx, sheetsClient, spreadsheetID, sheetName, update) {
-			log.Info().
-				Int("row", update.RowIndex).
-				Str("provider", update.Provider).
-				Str("datetime", update.DateTime).
-				Float64("market_value", update.MarketValue).
-				Msg("Updated provided item row")
+			slog.Info("Updated provided item row",
+				"row", update.RowIndex,
+				"provider", update.Provider,
+				"datetime", update.DateTime,
+				"market_value", update.MarketValue,
+			)
 		}
 	}
 
-	log.Debug().
-		Int("updates", len(updates)).
-		Msg("Finished updating provided item rows")
+	slog.Debug("Finished updating provided item rows", "updates", len(updates))
 }
 
 // updateAllSheetCells updates all required cells for a provided item row
@@ -81,7 +76,11 @@ func updateSheetCell(ctx context.Context, sheetsClient *Client, spreadsheetID, s
 	}
 	cellRange := fmt.Sprintf("%s!%s%d", sheetName, column, rowIndex)
 	if err := sheetsClient.UpdateRange(ctx, spreadsheetID, cellRange, values); err != nil {
-		log.Error().Err(err).Int("row", rowIndex).Str("column", column).Msgf("Failed to update %s column", columnDescription)
+		slog.Error(fmt.Sprintf("Failed to update %s column", columnDescription),
+			"error", err,
+			"row", rowIndex,
+			"column", column,
+		)
 		return false
 	}
 	return true

@@ -2,66 +2,31 @@ package app
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"strconv"
-	"strings"
 	"time"
 
 	"torn_oc_items/internal/env"
+	"torn_oc_items/internal/log"
 	"torn_oc_items/internal/notifications"
 	"torn_oc_items/internal/sheets"
 	"torn_oc_items/internal/torn"
-
-	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 )
 
-// SetupEnvironment loads .env file and configures zerolog output and log level.
+// SetupEnvironment loads .env file and configures logging.
 func SetupEnvironment() {
 	// Load .env file if it exists
 	err := env.Load(".env")
 
 	// Configure logging
-	if os.Getenv("ENV") == "production" {
-		zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
-		log.Logger = log.Output(os.Stderr)
-	} else {
-		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
-	}
-
-	levelStr := strings.ToLower(os.Getenv("LOGLEVEL"))
-	switch levelStr {
-	case "debug":
-		zerolog.SetGlobalLevel(zerolog.DebugLevel)
-	case "info":
-		zerolog.SetGlobalLevel(zerolog.InfoLevel)
-	case "warn", "warning":
-		zerolog.SetGlobalLevel(zerolog.WarnLevel)
-	case "error":
-		zerolog.SetGlobalLevel(zerolog.ErrorLevel)
-	case "fatal":
-		zerolog.SetGlobalLevel(zerolog.FatalLevel)
-	case "panic":
-		zerolog.SetGlobalLevel(zerolog.PanicLevel)
-	case "disabled":
-		zerolog.SetGlobalLevel(zerolog.Disabled)
-	case "":
-		// Default based on environment
-		if os.Getenv("ENV") == "production" {
-			zerolog.SetGlobalLevel(zerolog.WarnLevel)
-		} else {
-			zerolog.SetGlobalLevel(zerolog.InfoLevel)
-		}
-	default:
-		zerolog.SetGlobalLevel(zerolog.InfoLevel)
-		log.Warn().Msgf("Unknown LOGLEVEL '%s', defaulting to info.", levelStr)
-	}
+	log.Setup()
 
 	// wait until now to report on the .env file so we have the chance to set up logging first
 	if err == nil {
-		log.Debug().Msg("Loaded environment variables from .env file.")
+		slog.Debug("Loaded environment variables from .env file.")
 	} else {
-		log.Debug().Msg("No .env file found or error loading .env file; proceeding with existing environment variables.")
+		slog.Debug("No .env file found or error loading .env file; proceeding with existing environment variables.")
 	}
 }
 
@@ -69,7 +34,8 @@ func SetupEnvironment() {
 func GetRequiredEnv(key string) string {
 	value := os.Getenv(key)
 	if value == "" {
-		log.Fatal().Msgf("%s environment variable is required", key)
+		slog.Error(key+" environment variable is required.")
+		os.Exit(1)
 	}
 	return value
 }
@@ -85,7 +51,7 @@ func GetEnvWithDefault(key, defaultValue string) string {
 
 // InitializeClients creates and returns the Torn API client and Google Sheets client
 func InitializeClients(ctx context.Context) (*torn.Client, *sheets.Client) {
-	log.Debug().Msg("Initializing clients")
+	slog.Debug("Initializing clients")
 	apiKey := GetRequiredEnv("TORN_API_KEY")
 	factionApiKey := GetRequiredEnv("TORN_FACTION_API_KEY")
 	credsFile := "credentials.json"
@@ -93,10 +59,11 @@ func InitializeClients(ctx context.Context) (*torn.Client, *sheets.Client) {
 	tornClient := torn.NewClient(apiKey, factionApiKey)
 	sheetsClient, err := sheets.NewClient(ctx, credsFile)
 	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to create sheets client")
+		slog.Error("Failed to create sheets client", "error", err)
+		os.Exit(1)
 	}
 
-	log.Debug().Msg("Clients initialized successfully")
+	slog.Debug("Clients initialized successfully")
 	return tornClient, sheetsClient
 }
 
@@ -116,16 +83,16 @@ func InitializeNotificationClient() *notifications.Client {
 	baseDelay := time.Duration(baseDelayMs) * time.Millisecond
 	maxDelay := time.Duration(maxDelayMs) * time.Millisecond
 
-	log.Debug().
-		Bool("enabled", enabled).
-		Str("base_url", baseURL).
-		Str("topic", topic).
-		Bool("batch_mode", batchMode).
-		Str("priority", priority).
-		Int("max_retries", maxRetries).
-		Dur("base_delay", baseDelay).
-		Dur("max_delay", maxDelay).
-		Msg("Initializing notification client")
+	slog.Debug("Initializing notification client",
+		"enabled", enabled,
+		"base_url", baseURL,
+		"topic", topic,
+		"batch_mode", batchMode,
+		"priority", priority,
+		"max_retries", maxRetries,
+		"base_delay", baseDelay,
+		"max_delay", maxDelay,
+	)
 
 	client := notifications.NewClient(baseURL, topic, enabled, batchMode, priority, maxRetries, baseDelay, maxDelay)
 
@@ -134,14 +101,14 @@ func InitializeNotificationClient() *notifications.Client {
 		if !batchMode {
 			mode = "individual"
 		}
-		log.Info().
-			Str("topic", topic).
-			Str("mode", mode).
-			Str("priority", priority).
-			Int("max_retries", maxRetries).
-			Msg("Notifications enabled")
+		slog.Info("Notifications enabled",
+			"topic", topic,
+			"mode", mode,
+			"priority", priority,
+			"max_retries", maxRetries,
+		)
 	} else {
-		log.Debug().Msg("Notifications disabled")
+		slog.Debug("Notifications disabled")
 	}
 
 	return client
@@ -158,11 +125,11 @@ func parseIntWithDefault(key string, defaultValue int) int {
 		return val
 	}
 
-	log.Warn().
-		Str("key", key).
-		Str("value", str).
-		Int("default", defaultValue).
-		Msg("Invalid integer value, using default")
+	slog.Warn("Invalid integer value, using default",
+		"key", key,
+		"value", str,
+		"default", defaultValue,
+	)
 
 	return defaultValue
 }
