@@ -13,7 +13,7 @@ type Client struct {
 }
 
 func NewClient(ctx context.Context, credentialsFile string) (*Client, error) {
-	service, err := sheets.NewService(ctx, option.WithCredentialsFile(credentialsFile))
+	service, err := sheets.NewService(ctx, option.WithAuthCredentialsFile(option.ServiceAccount, credentialsFile))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create sheets service: %w", err)
 	}
