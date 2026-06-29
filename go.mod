@@ -3,7 +3,6 @@ module torn_oc_items
 go 1.26.4
 
 require (
-	github.com/joho/godotenv v1.5.1
 	github.com/rs/zerolog v1.35.1
 	google.golang.org/api v0.282.0
 )
