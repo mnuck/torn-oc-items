@@ -1,5 +1,5 @@
-# Build stage - Use latest 1.26.0 Alpine image
-FROM --platform=$BUILDPLATFORM golang:1.26.0-alpine AS builder
+# Build stage - Use latest 1.26.4 Alpine image
+FROM --platform=$BUILDPLATFORM golang:1.26.4-alpine AS builder
 
 ARG TARGETOS
 ARG TARGETARCH
