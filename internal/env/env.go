@@ -74,7 +74,7 @@ func Load(path string) error {
 		key := strings.TrimSpace(kv[0])
 		val := strings.TrimSpace(kv[1])
 		val = unquote(val)
-		os.Setenv(key, val)
+		_ = os.Setenv(key, val)
 	}
 	return sc.Err()
 }
