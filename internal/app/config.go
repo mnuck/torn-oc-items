@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
+	"torn_oc_items/internal/env"
 	"torn_oc_items/internal/notifications"
 	"torn_oc_items/internal/sheets"
 	"torn_oc_items/internal/torn"
 
-	"github.com/joho/godotenv"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -19,7 +19,7 @@ import (
 // SetupEnvironment loads .env file and configures zerolog output and log level.
 func SetupEnvironment() {
 	// Load .env file if it exists
-	err := godotenv.Load()
+	err := env.Load(".env")
 
 	// Configure logging
 	if os.Getenv("ENV") == "production" {
