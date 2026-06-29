@@ -2,12 +2,11 @@ package providers
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"strings"
 
 	"torn_oc_items/internal/torn"
-
-	"github.com/rs/zerolog/log"
 )
 
 type Provider struct {
@@ -23,7 +22,6 @@ type ProviderLogEntry struct {
 
 // LoadProviders reads PROVIDER_KEYS from the environment (comma-separated list of Torn API keys),
 // resolves each key to a player name via WhoAmI, and returns a slice of Provider instances.
-// Invalid keys are skipped with a warning.
 func LoadProviders(ctx context.Context) []Provider {
 	keys := strings.Split(os.Getenv("PROVIDER_KEYS"), ",")
 	var providers []Provider
@@ -32,33 +30,31 @@ func LoadProviders(ctx context.Context) []Provider {
 		if key == "" {
 			continue
 		}
-
-		client := torn.NewClient(key, "") // empty faction key – not needed for WhoAmI or logs
+		client := torn.NewClient(key, "")
 		name, err := client.WhoAmI(ctx)
 		if err != nil {
-			log.Warn().Err(err).Msg("Failed to resolve provider key; skipping")
+			slog.Warn("Failed to resolve provider key; skipping", "error", err)
 			continue
 		}
 		providers = append(providers, Provider{Name: name, Client: client})
-		log.Info().Str("provider", name).Msg("Loaded provider API key")
+		slog.Info("Loaded provider API key", "provider", name)
 	}
 	return providers
 }
 
-// AggregateLogs fetches item-send logs for the last 48h from all providers and
-// returns a slice of ProviderLogEntry with each entry tagged with its provider name.
+// AggregateLogs fetches item-send logs for the last 48h from all providers.
 func AggregateLogs(ctx context.Context, provs []Provider) []ProviderLogEntry {
 	var combined []ProviderLogEntry
 	for _, p := range provs {
 		resp, err := p.Client.GetItemSendLogs(ctx)
 		if err != nil {
-			log.Warn().Err(err).Str("provider", p.Name).Msg("Failed to fetch logs for provider")
+			slog.Warn("Failed to fetch logs for provider", "provider", p.Name, "error", err)
 			continue
 		}
 		for _, entry := range resp.Log {
 			combined = append(combined, ProviderLogEntry{ProviderName: p.Name, Entry: entry})
 		}
 	}
-	log.Debug().Int("combined_log_entries", len(combined)).Msg("Aggregated logs from all providers")
+	slog.Debug("Aggregated logs from all providers", "combined_log_entries", len(combined))
 	return combined
 }

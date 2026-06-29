@@ -3,14 +3,15 @@ package sheets
 import (
 	"os"
 
-	"github.com/rs/zerolog/log"
+	"log/slog"
 )
 
 // getRequiredEnv fetches a required environment variable or exits if not set.
 func getRequiredEnv(key string) string {
 	value := os.Getenv(key)
 	if value == "" {
-		log.Fatal().Msgf("%s environment variable is required", key)
+		slog.Error(key + " environment variable is required")
+		os.Exit(1)
 	}
 	return value
 }

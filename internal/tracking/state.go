@@ -1,9 +1,8 @@
 package tracking
 
 import (
+	"log/slog"
 	"sync"
-
-	"github.com/rs/zerolog/log"
 )
 
 type StateTransition struct {
@@ -32,12 +31,12 @@ func (st *StateTracker) UpdateCrimeState(crimeID int, crimeName, newState string
 	st.crimeStates[crimeID] = newState
 
 	if exists && previousState != newState {
-		log.Debug().
-			Int("crime_id", crimeID).
-			Str("crime_name", crimeName).
-			Str("from_state", previousState).
-			Str("to_state", newState).
-			Msg("Crime state transition detected")
+		slog.Debug("Crime state transition detected",
+			"crime_id", crimeID,
+			"crime_name", crimeName,
+			"from_state", previousState,
+			"to_state", newState,
+		)
 
 		return &StateTransition{
 			CrimeID:   crimeID,
@@ -48,11 +47,11 @@ func (st *StateTracker) UpdateCrimeState(crimeID int, crimeName, newState string
 	}
 
 	if !exists {
-		log.Debug().
-			Int("crime_id", crimeID).
-			Str("crime_name", crimeName).
-			Str("state", newState).
-			Msg("First time seeing crime, recording state")
+		slog.Debug("First time seeing crime, recording state",
+			"crime_id", crimeID,
+			"crime_name", crimeName,
+			"state", newState,
+		)
 	}
 
 	return nil
