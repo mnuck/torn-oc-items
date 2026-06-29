@@ -181,7 +181,7 @@ func (c *Client) makeAPIRequest(ctx context.Context, url string) (*http.Response
 
 // handleAPIResponse processes the HTTP response and returns the body bytes
 func (c *Client) handleAPIResponse(resp *http.Response) ([]byte, error) {
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)

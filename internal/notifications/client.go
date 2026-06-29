@@ -184,7 +184,7 @@ func (c *Client) sendSingleNotification(ctx context.Context, message string, att
 			Underlying: err,
 		}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
 		errType := c.categorizeHTTPError(resp.StatusCode)
@@ -279,7 +279,7 @@ func (c *Client) formatBatchMessage(items []ItemInfo, totalAdded int) string {
 	if totalAdded == 1 {
 		sb.WriteString("🎯 Torn OC: 1 new item needed\n")
 	} else {
-		sb.WriteString(fmt.Sprintf("🎯 Torn OC: %d new items needed\n", totalAdded))
+		fmt.Fprintf(&sb, "🎯 Torn OC: %d new items needed\n", totalAdded)
 	}
 
 	maxItemsToShow := 10
@@ -290,12 +290,12 @@ func (c *Client) formatBatchMessage(items []ItemInfo, totalAdded int) string {
 
 	for i := 0; i < itemsToShow; i++ {
 		item := items[i]
-		sb.WriteString(fmt.Sprintf("• %s for %s\n", item.ItemName, item.UserName))
+		fmt.Fprintf(&sb, "• %s for %s\n", item.ItemName, item.UserName)
 	}
 
 	if len(items) > maxItemsToShow {
 		remaining := len(items) - maxItemsToShow
-		sb.WriteString(fmt.Sprintf("... and %d more items\n", remaining))
+		fmt.Fprintf(&sb, "... and %d more items\n", remaining)
 	}
 
 	return strings.TrimSuffix(sb.String(), "\n")
@@ -306,18 +306,18 @@ func (c *Client) formatIndividualMessage(item ItemInfo, itemNum, totalItems int)
 
 	// Title with item counter if multiple items
 	if totalItems > 1 {
-		sb.WriteString(fmt.Sprintf("📋 New item needed (%d/%d)\n", itemNum, totalItems))
+		fmt.Fprintf(&sb, "📋 New item needed (%d/%d)\n", itemNum, totalItems)
 	} else {
 		sb.WriteString("📋 New item needed\n")
 	}
 
 	// Item details with rich formatting
-	sb.WriteString(fmt.Sprintf("🎯 **%s**\n", item.ItemName))
-	sb.WriteString(fmt.Sprintf("👤 For: %s\n", item.UserName))
+	fmt.Fprintf(&sb, "🎯 **%s**\n", item.ItemName)
+	fmt.Fprintf(&sb, "👤 For: %s\n", item.UserName)
 
 	// Add crime link if available
 	if item.CrimeURL != "" {
-		sb.WriteString(fmt.Sprintf("🔗 Crime: %s\n", item.CrimeURL))
+		fmt.Fprintf(&sb, "🔗 Crime: %s\n", item.CrimeURL)
 	}
 
 	return strings.TrimSuffix(sb.String(), "\n")
