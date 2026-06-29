@@ -3,7 +3,6 @@ package sheets
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"google.golang.org/api/option"
 	"google.golang.org/api/sheets/v4"
@@ -14,11 +13,7 @@ type Client struct {
 }
 
 func NewClient(ctx context.Context, credentialsFile string) (*Client, error) {
-	credData, err := os.ReadFile(credentialsFile)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read credentials file: %w", err)
-	}
-	service, err := sheets.NewService(ctx, option.WithCredentialsJSON(credData))
+	service, err := sheets.NewService(ctx, option.WithAuthCredentialsFile(option.ServiceAccount, credentialsFile))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create sheets service: %w", err)
 	}
